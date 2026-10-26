@@ -127,21 +127,16 @@ if ($env:WB_LAUNCHER_TEST -eq '1') {
 $edge = Find-Edge
 try {
     if ($edge) {
-        # App 形式（无地址栏）。使用独立配置目录，确保 --app 被当作独立应用窗口打开，
-        # 而不是被并入已有浏览器实例；同时让下面的 flags 真正生效。
-        $edgeProfile = Join-Path $env:LOCALAPPDATA 'DianGongHouWorkbench\EdgeApp'
-        try { New-Item -ItemType Directory -Force -Path $edgeProfile | Out-Null } catch { }
+        # App 形式（无地址栏）。沿用现有 Edge 配置：新建独立 profile 会触发 Edge 首次运行欢迎页，
+        # 反而看不到应用窗口（实测：新 profile 里没有 "First Run" 标记 = 走了欢迎流程）。
         $edgeArgs = @(
             "--app=$url",
             '--window-size=1120,860',
-            ('--user-data-dir="{0}"' -f $edgeProfile),
             '--no-first-run',
-            '--no-default-browser-check',
-            '--disable-sync',
-            '--disable-features=HttpsUpgrades,HttpsFirstBalancedModeAutoEnable'
+            '--no-default-browser-check'
         )
         Start-Process -FilePath $edge -ArgumentList $edgeArgs | Out-Null
-        Write-Log ("opened in Edge app mode: {0} (profile={1})" -f $url, $edgeProfile)
+        Write-Log "opened in Edge app mode: $url"
     } else {
         Start-Process -FilePath $url | Out-Null
         Write-Log "edge not found; opened in default browser: $url"
