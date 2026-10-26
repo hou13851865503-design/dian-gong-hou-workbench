@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f5a4d">
+  <title>电工猴的此思妙想工作台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #16231f;
+      --muted: #6b7d77;
+      --line: #e6ece9;
+      --paper: #ffffff;
+      --canvas: #eef1ef;
+      --teal: #167c6b;
+      --teal-dark: #0f5a4d;
+      --teal-2: #1fa08a;
+      --coral: #d56d59;
+      --gold: #bd801e;
+      --rail-bg: linear-gradient(180deg, #103a32 0%, #0f5a4d 60%, #0c4a3f 100%);
+      --shadow-sm: 0 1px 2px rgba(16,46,39,.06), 0 1px 3px rgba(16,46,39,.05);
+      --shadow-md: 0 10px 30px rgba(16,46,39,.10);
+      --shadow-lg: 0 24px 60px rgba(16,46,39,.18);
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      min-width: 340px;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      color: var(--ink);
+      background:
+        radial-gradient(60vw 60vw at 85% -10%, rgba(31,160,138,.10), transparent 60%),
+        radial-gradient(50vw 50vw at -10% 110%, rgba(22,124,107,.08), transparent 55%),
+        var(--canvas);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 28px 18px;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background:
+        radial-gradient(36vw 36vw at 12% 16%, rgba(31,160,138,.16), transparent 60%),
+        radial-gradient(30vw 30vw at 88% 10%, rgba(189,128,30,.10), transparent 60%),
+        radial-gradient(40vw 40vw at 80% 90%, rgba(22,124,107,.14), transparent 60%);
+      filter: blur(8px);
+      animation: auroraDrift 22s ease-in-out infinite alternate;
+    }
+
+    @keyframes auroraDrift {
+      0%   { transform: translate3d(0, 0, 0) scale(1); }
+      50%  { transform: translate3d(2%, -2%, 0) scale(1.06); }
+      100% { transform: translate3d(-2%, 2%, 0) scale(1.03); }
+    }
+
+    .win {
+      width: min(100%, 1000px);
+      height: min(86vh, 720px);
+      display: grid;
+      grid-template-columns: 84px minmax(0, 1fr);
+      background: var(--paper);
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+      border: 1px solid rgba(255,255,255,.6);
+    }
+
+    /* ===== 左侧导航栏（模仿 QQ 彩色左栏） ===== */
+    .rail {
+      background: var(--rail-bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 18px 0;
+      gap: 6px;
+      color: #dfeee8;
+    }
+
+    .rail-brand {
+      width: 46px;
+      height: 46px;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 4px 14px rgba(0,0,0,.28);
+      margin-bottom: 14px;
+      background: #fff;
+    }
+    .rail-brand img { width: 100%; height: 100%; object-fit: cover; }
+
+    .rail-nav { display: flex; flex-direction: column; gap: 6px; width: 100%; align-items: center; flex: 1; }
+    .rail-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+
+    .rail-item {
+      width: 54px;
+      height: 54px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      color: #cfe6dd;
+      text-decoration: none;
+      position: relative;
+      transition: background .15s, color .15s, transform .15s;
+    }
+    .rail-item svg { width: 24px; height: 24px; }
+    .rail-item:hover { background: rgba(255,255,255,.10); color: #fff; }
+    .rail-item.active { background: rgba(255,255,255,.16); color: #fff; }
+    .rail-item.active::before {
+      content: "";
+      position: absolute;
+      left: -12px;
+      top: 14px;
+      bottom: 14px;
+      width: 3px;
+      border-radius: 3px;
+      background: var(--teal-2);
+    }
+    .rail-item:focus-visible { outline: 3px solid #8fcdbb; outline-offset: 2px; }
+
+    /* ===== 右侧内容区（模仿微信内容栏） ===== */
+    .stage { display: flex; flex-direction: column; min-width: 0; background: var(--canvas); }
+
+    .stage-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px 22px;
+      background: var(--paper);
+      border-bottom: 1px solid var(--line);
+    }
+    .stage-head .title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .stage-head h1 { margin: 0; font-size: 17px; font-weight: 800; line-height: 1.2; }
+    .stage-head .sub { font-size: 12px; color: var(--muted); }
+
+    .stage-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .lbtn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 14px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 800;
+      text-decoration: none;
+      box-shadow: var(--shadow-sm);
+      transition: filter .15s, transform .15s, box-shadow .15s;
+    }
+    .lbtn.primary { background: linear-gradient(135deg, var(--teal), var(--teal-2)); color: #fff; }
+    .lbtn.ghost { background: #fff; color: var(--teal-dark); border: 1px solid var(--line); }
+    .lbtn:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+    .lbtn:active { transform: translateY(0); }
+    .lbtn:focus-visible { outline: 3px solid #8fcdbb; outline-offset: 2px; }
+
+    .stage-body { padding: 18px 22px; overflow: auto; flex: 1; }
+
+    .portal-note {
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--teal);
+      border-radius: 10px;
+      background: rgba(227,242,237,.7);
+      color: var(--teal-dark);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .portal-note code { background: rgba(15,90,77,.10); padding: 1px 5px; border-radius: 5px; font-size: 11px; }
+
+    .app-list { display: flex; flex-direction: column; gap: 10px; }
+    .app-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper);
+      text-decoration: none;
+      color: inherit;
+      box-shadow: var(--shadow-sm);
+      transition: border-color .18s, box-shadow .18s, transform .18s;
+    }
+    .app-row:hover { border-color: var(--teal); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+    .app-row:focus-visible { outline: 3px solid #8fcdbb; outline-offset: 2px; }
+
+    .app-ava {
+      width: 48px;
+      height: 48px;
+      flex: 0 0 48px;
+      border-radius: 13px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+    .app-ava.assignment { background: linear-gradient(135deg, var(--teal), var(--teal-2)); }
+    .app-ava.agents { background: linear-gradient(135deg, var(--coral), #e89b86); }
+    .app-ava svg { width: 24px; height: 24px; }
+
+    .app-main { min-width: 0; flex: 1; }
+    .app-main h3 { margin: 0 0 4px; font-size: 15px; font-weight: 800; }
+    .app-main p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.55;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+
+    .app-meta { display: inline-flex; align-items: center; gap: 8px; color: var(--teal-dark); font-size: 12px; font-weight: 800; white-space: nowrap; }
+    .app-meta svg { width: 16px; height: 16px; transition: transform .18s; }
+    .app-row:hover .app-meta svg { transform: translate(3px, -3px); }
+    .badge { font-size: 10px; font-weight: 800; color: #fff; background: var(--teal); border-radius: 999px; padding: 3px 8px; }
+    .badge.local { background: var(--gold); }
+
+    .footer { text-align: center; padding: 10px; color: var(--muted); font-size: 11px; }
+    .local-indicator { display: inline-flex; align-items: center; gap: 6px; }
+    .local-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 3px rgba(22,124,107,.18); }
+
+    @media (prefers-reduced-motion: reduce) {
+      body::before { animation: none; }
+      .app-row:hover { transform: none; }
+      .lbtn:hover { transform: none; }
+    }
+
+    @media (max-width: 680px) {
+      body { padding: 0; }
+      .win { width: 100%; height: 100vh; border-radius: 0; border: none; grid-template-columns: 64px minmax(0, 1fr); }
+      .rail-brand { width: 40px; height: 40px; }
+      .stage-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+      .stage-actions { width: 100%; }
+      .lbtn { flex: 1; justify-content: center; }
+    }
+    .features { margin-top: 20px; }
+    .features-title { margin: 0 0 12px; font-size: 14px; font-weight: 800; color: var(--ink); }
+    .feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .feature { display: flex; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); box-shadow: var(--shadow-sm); }
+    .feature-ico { font-size: 18px; line-height: 1.2; flex: 0 0 auto; }
+    .feature h4 { margin: 0 0 3px; font-size: 13px; font-weight: 800; }
+    .feature p { margin: 0; font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+    @media (max-width: 560px) {
+      .feature-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ===== 聚合仪表盘 ===== */
+    .dash { margin-top: 20px; }
+    .dash-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
+    .dash-head h2 { margin: 0; font-size: 14px; font-weight: 800; color: var(--ink); }
+    .dash-refresh { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+    .dash-refresh .spin { width: 11px; height: 11px; border: 2px solid var(--line); border-top-color: var(--teal); border-radius: 50%; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .dash-card { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 10px; }
+    .dash-card-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .dash-card-hd .name { font-size: 13px; font-weight: 800; min-width: 0; }
+    .dash-status { font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .dash-status.on { color: #0f5a4d; background: rgba(31,160,138,.14); }
+    .dash-status.off { color: #b06a1e; background: rgba(189,128,30,.14); }
+    .dash-status .sdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .dash-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .metric { background: var(--canvas); border-radius: 9px; padding: 9px 6px; text-align: center; }
+    .metric-val { font-size: 18px; font-weight: 800; line-height: 1.1; color: var(--ink); word-break: break-all; }
+    .metric-lbl { font-size: 10px; color: var(--muted); margin-top: 3px; }
+    .dash-offline { font-size: 11px; color: var(--muted); line-height: 1.6; }
+    .dash-offline code { background: rgba(15,90,77,.10); padding: 1px 5px; border-radius: 5px; font-size: 10px; }
+
+    @media (max-width: 560px) {
+      .dash-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="win">
+    <aside class="rail">
+      <div class="rail-brand"><img src="./电工猴的此思妙想工作台.png" alt="电工猴工作台图标"></div>
+      <nav class="rail-nav">
+        <a class="rail-item active" href="apps/qq-email-homework-assistant/" aria-label="QQ 邮箱作业班长助手">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M7 3.75h7l4 4v12.5H7a2 2 0 0 1-2-2v-12.5a2 2 0 0 1 2-2Z"/>
+            <path d="M14 3.75v4h4M8.5 12h7M8.5 15.5h7"/>
+          </svg>
+        </a>
+        <a class="rail-item" href="apps/domestic-global-ai-workbench/" aria-label="国内外 AI 协同工作台">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="5" r="2.25"/>
+            <circle cx="6" cy="18" r="2.25"/>
+            <circle cx="18" cy="18" r="2.25"/>
+            <path d="M10.9 7 7.1 16M13.1 7l3.8 9M8.5 18h7"/>
+          </svg>
+        </a>
+      </nav>
+      <div class="rail-foot">
+        <a class="rail-item" href="workbench://center" aria-label="打开应用中心">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
+          </svg>
+        </a>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <header class="stage-head">
+        <div class="title">
+          <h1>电工猴的此思妙想工作台</h1>
+          <span class="sub">本地应用中心 · 班务工具与 AI 协作</span>
+        </div>
+        <div class="stage-actions">
+          <a class="lbtn primary" href="workbench://homework">启动作业助手</a>
+          <a class="lbtn ghost" href="workbench://ai">启动 AI 工作台</a>
+        </div>
+      </header>
+
+      <div class="stage-body">
+        <p class="portal-note">实际启动请用桌面「电工猴的此思妙想工作台」快捷方式（应用中心）。下方列表可打开对应应用所在文件夹；一键启动需先双击合并 <code>workbench-url-protocol.reg</code> 注册本地协议。</p>
+        <div class="app-list">
+          <a class="app-row" href="apps/qq-email-homework-assistant/">
+            <span class="app-ava assignment" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 3.75h7l4 4v12.5H7a2 2 0 0 1-2-2v-12.5a2 2 0 0 1 2-2Z"/>
+                <path d="M14 3.75v4h4M8.5 12h7M8.5 15.5h7"/>
+              </svg>
+            </span>
+            <span class="app-main">
+              <h3>QQ 邮箱作业班长助手</h3>
+              <p>作业收集与提交统计：按需扫描收件箱、收取 PDF、统计已交 / 未交并发送提醒。</p>
+            </span>
+            <span class="app-meta"><span class="badge local">本地</span>打开
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+            </span>
+          </a>
+
+          <a class="app-row" href="apps/domestic-global-ai-workbench/">
+            <span class="app-ava agents" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="5" r="2.25"/>
+                <circle cx="6" cy="18" r="2.25"/>
+                <circle cx="18" cy="18" r="2.25"/>
+                <path d="M10.9 7 7.1 16M13.1 7l3.8 9M8.5 18h7"/>
+              </svg>
+            </span>
+            <span class="app-main">
+              <h3>国内外 AI 协同工作台</h3>
+              <p>多 Agent 任务协作：评估、提示词优化、执行与独立验收，跨本地后端协同。</p>
+            </span>
+            <span class="app-meta"><span class="badge">AI</span>打开
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+            </span>
+          </a>
+        </div>
+
+        <section class="dash">
+          <div class="dash-head">
+            <h2>运行概览</h2>
+            <span class="dash-refresh"><span class="spin" id="dashSpin" aria-hidden="true" style="animation: spin 1s linear infinite"></span><span id="dashUpdated">加载中…</span></span>
+          </div>
+          <div class="dash-grid">
+            <div class="dash-card" id="dashHomework">
+              <div class="dash-card-hd">
+                <span class="name">QQ 邮箱作业班长助手</span>
+                <span class="dash-status off" id="hwStatus"><span class="sdot"></span>未运行</span>
+              </div>
+              <div class="dash-metrics" id="hwMetrics"></div>
+              <div class="dash-offline" id="hwOffline" hidden>未检测到本地服务（端口 8765）。请通过桌面快捷方式启动应用中心。</div>
+            </div>
+            <div class="dash-card" id="dashAi">
+              <div class="dash-card-hd">
+                <span class="name">国内外 AI 协同工作台</span>
+                <span class="dash-status off" id="aiStatus"><span class="sdot"></span>未运行</span>
+              </div>
+              <div class="dash-metrics" id="aiMetrics"></div>
+              <div class="dash-offline" id="aiOffline" hidden>未检测到本地服务（端口 8767）。请通过桌面快捷方式启动应用中心。</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="features">
+          <h2 class="features-title">功能亮点</h2>
+          <div class="feature-grid">
+            <div class="feature"><span class="feature-ico">📊</span><div><h4>提交可视化</h4><p>环形完成度 + 班级分布，谁没交一眼看清。</p></div></div>
+            <div class="feature"><span class="feature-ico">🔒</span><div><h4>本地隐私优先</h4><p>授权码只留内存，扫描结果与 PDF 都在本机。</p></div></div>
+            <div class="feature"><span class="feature-ico">🤖</span><div><h4>多 Agent 流水线</h4><p>评估 → 优化 → 执行 → 验收，失败自动打回。</p></div></div>
+            <div class="feature"><span class="feature-ico">💬</span><div><h4>实时控制台</h4><p>与 Codex 直接对话，工具调用全程可追。</p></div></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="footer">
+    <span class="local-indicator"><span class="local-dot" aria-hidden="true"></span>本地工作台 · 2 个本机应用 · 经桌面快捷方式启动</span>
+  </div>
+
+  <script>
+    (function () {
+      var HW_URL = "http://127.0.0.1:8765/api/status";
+      var AI_URL = "http://127.0.0.1:8767/api/status";
+      function $(id) { return document.getElementById(id); }
+      function fmt(n) { return (n === null || n === undefined || n === "") ? "—" : String(n); }
+
+      function setCard(prefix, online, statusText) {
+        var st = $(prefix + "Status");
+        st.className = "dash-status " + (online ? "on" : "off");
+        st.innerHTML = '<span class="sdot"></span>' + statusText;
+        $(prefix + "Offline").hidden = online;
+      }
+
+      function showMetrics(prefix, metrics) {
+        var box = $(prefix + "Metrics");
+        box.innerHTML = metrics.map(function (m) {
+          return '<div class="metric"><div class="metric-val">' + m.v + '</div><div class="metric-lbl">' + m.l + '</div></div>';
+        }).join("");
+      }
+
+      function renderHw(data) {
+        var online = !!data && data.running !== false;
+        setCard("hw", online, online ? (data.connected ? "已连接" : "已运行") : "未运行");
+        if (!online) { showMetrics("hw", []); return; }
+        showMetrics("hw", [
+          { v: fmt(data.task_count), l: "任务数" },
+          { v: fmt(data.roster_count), l: "名单人数" },
+          { v: data.connected ? "已连" : "未连", l: "邮箱" }
+        ]);
+      }
+
+      function renderAi(data) {
+        var online = !!data;
+        setCard("ai", online, online ? "运行中" : "未运行");
+        if (!online) { showMetrics("ai", []); return; }
+        var s = data.stats || {};
+        showMetrics("ai", [
+          { v: fmt(s.total), l: "任务总数" },
+          { v: fmt(s.active), l: "进行中" },
+          { v: (s.pass_rate === null || s.pass_rate === undefined) ? "—" : s.pass_rate + "%", l: "通过率" }
+        ]);
+      }
+
+      function fetchJson(url) {
+        var ctrl = new AbortController();
+        var timer = setTimeout(function () { ctrl.abort(); }, 2500);
+        return fetch(url, { cache: "no-store", signal: ctrl.signal })
+          .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.json(); })
+          .finally(function () { clearTimeout(timer); });
+      }
+
+      function loadDash() {
+        var spin = $("dashSpin");
+        if (spin) spin.style.animation = "spin 1s linear infinite";
+        Promise.allSettled([fetchJson(HW_URL), fetchJson(AI_URL)]).then(function (res) {
+          renderHw(res[0].status === "fulfilled" ? res[0].value : null);
+          renderAi(res[1].status === "fulfilled" ? res[1].value : null);
+          if (spin) spin.style.animation = "none";
+          var t = new Date();
+          $("dashUpdated").textContent = "更新于 " + t.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        }).catch(function () {
+          if (spin) spin.style.animation = "none";
+        });
+      }
+
+      document.addEventListener("DOMContentLoaded", function () {
+        loadDash();
+        setInterval(loadDash, 30000);
+      });
+    })();
+  </script>
+</body>
+</html>

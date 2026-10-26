@@ -1,0 +1,5 @@
+apps/
+workbench-url-protocol.reg
+*.log
+Thumbs.db
+.DS_Store

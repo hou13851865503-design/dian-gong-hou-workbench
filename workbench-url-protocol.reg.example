@@ -1,0 +1,15 @@
+Windows Registry Editor Version 5.00
+
+; 使用前把 C:\\path\\to\\workbench 替换成你的工作台实际目录
+; （即 launcher.ps1 / launch-handler.ps1 所在的目录），保存后双击合并。
+
+[HKEY_CURRENT_USER\Software\Classes\workbench]
+@="URL:Workbench Protocol"
+"URL Protocol"=""
+
+[HKEY_CURRENT_USER\Software\Classes\workbench\shell]
+
+[HKEY_CURRENT_USER\Software\Classes\workbench\shell\open]
+
+[HKEY_CURRENT_USER\Software\Classes\workbench\shell\open\command]
+@="\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\workbench\\launch-handler.ps1\" \"%1\""
