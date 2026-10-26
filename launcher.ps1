@@ -127,14 +127,34 @@ if ($env:WB_LAUNCHER_TEST -eq '1') {
 $edge = Find-Edge
 try {
     if ($edge) {
-        # --new-window 保证独立窗口；网络错误时不复用已有标签而显示空白
-        Start-Process -FilePath $edge -ArgumentList @('--new-window', $url) | Out-Null
-        Write-Log "opened in Edge: $url"
+        # App 形式（无地址栏）。使用独立配置目录，确保 --app 被当作独立应用窗口打开，
+        # 而不是被并入已有浏览器实例；同时让下面的 flags 真正生效。
+        $edgeProfile = Join-Path $env:LOCALAPPDATA 'DianGongHouWorkbench\EdgeApp'
+        try { New-Item -ItemType Directory -Force -Path $edgeProfile | Out-Null } catch { }
+        $edgeArgs = @(
+            "--app=$url",
+            '--window-size=1120,860',
+            ('--user-data-dir="{0}"' -f $edgeProfile),
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--disable-sync',
+            '--disable-features=HttpsUpgrades,HttpsFirstBalancedModeAutoEnable'
+        )
+        Start-Process -FilePath $edge -ArgumentList $edgeArgs | Out-Null
+        Write-Log ("opened in Edge app mode: {0} (profile={1})" -f $url, $edgeProfile)
     } else {
         Start-Process -FilePath $url | Out-Null
-        Write-Log "opened in default browser: $url"
+        Write-Log "edge not found; opened in default browser: $url"
     }
 } catch {
-    Write-Log "open failed: $($_.Exception.Message); trying shell open"
-    Start-Process -FilePath $url | Out-Null
+    Write-Log "app-mode open failed: $($_.Exception.Message); falling back to normal window"
+    try {
+        if ($edge) {
+            Start-Process -FilePath $edge -ArgumentList @('--new-window', $url) | Out-Null
+        } else {
+            Start-Process -FilePath $url | Out-Null
+        }
+    } catch {
+        Write-Log "fallback open failed: $($_.Exception.Message)"
+    }
 }
