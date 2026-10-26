@@ -43,7 +43,7 @@ git clone https://github.com/hou13851865503-design/qq-email-homework-assistant.g
 
 ## 使用
 
-- **双击 `launcher.ps1`**（或为它建快捷方式）打开悬浮版应用中心；
+- **双击 `launcher.ps1`**（或为它建快捷方式）打开悬浮版应用中心；底部会实时显示两个应用的服务状态（自动检测 8765 / 8767 端口），旁边有「打开门户页」「刷新状态」；
 - 只想看网页版：直接双击 `电工猴的此思妙想工作台.html`；
 - 门户页的"一键启动"按钮依赖 `workbench://` 协议：把 `workbench-url-protocol.reg.example` 里的路径改成你的实际目录，再双击合并进注册表。
 
