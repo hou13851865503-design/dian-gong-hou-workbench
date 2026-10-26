@@ -290,13 +290,13 @@
     <aside class="rail">
       <div class="rail-brand"><img src="./电工猴的此思妙想工作台.png" alt="电工猴工作台图标"></div>
       <nav class="rail-nav">
-        <a class="rail-item active" href="apps/qq-email-homework-assistant/" aria-label="QQ 邮箱作业班长助手">
+        <a class="rail-item active" href="#" onclick="return launchApp('homework',8765)" aria-label="QQ 邮箱作业班长助手">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M7 3.75h7l4 4v12.5H7a2 2 0 0 1-2-2v-12.5a2 2 0 0 1 2-2Z"/>
             <path d="M14 3.75v4h4M8.5 12h7M8.5 15.5h7"/>
           </svg>
         </a>
-        <a class="rail-item" href="apps/domestic-global-ai-workbench/" aria-label="国内外 AI 协同工作台">
+        <a class="rail-item" href="#" onclick="return launchApp('ai',8767)" aria-label="国内外 AI 协同工作台">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="5" r="2.25"/>
             <circle cx="6" cy="18" r="2.25"/>
@@ -306,7 +306,7 @@
         </a>
       </nav>
       <div class="rail-foot">
-        <a class="rail-item" href="workbench://center" aria-label="打开应用中心">
+        <a class="rail-item" href="#" onclick="location.reload();return false" aria-label="刷新应用中心">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
@@ -322,15 +322,15 @@
           <span class="sub">本地应用中心 · 班务工具与 AI 协作</span>
         </div>
         <div class="stage-actions">
-          <a class="lbtn primary" href="workbench://homework">启动作业助手</a>
-          <a class="lbtn ghost" href="workbench://ai">启动 AI 工作台</a>
+          <a class="lbtn primary" href="#" onclick="return launchApp('homework',8765)">启动作业助手</a>
+          <a class="lbtn ghost" href="#" onclick="return launchApp('ai',8767)">启动 AI 工作台</a>
         </div>
       </header>
 
       <div class="stage-body">
-        <p class="portal-note">实际启动请用桌面「电工猴的此思妙想工作台」快捷方式（应用中心）。下方列表可打开对应应用所在文件夹；一键启动需先双击合并 <code>workbench-url-protocol.reg</code> 注册本地协议。</p>
+        <p class="portal-note">点应用卡片或右上角按钮即可启动（由本地门户服务拉起，无需注册协议）。若点了没反应，说明你是用文件方式直接打开的——请改用桌面「电工猴的此思妙想工作台」快捷方式。</p>
         <div class="app-list">
-          <a class="app-row" href="apps/qq-email-homework-assistant/">
+          <a class="app-row" href="#" onclick="return launchApp('homework',8765)">
             <span class="app-ava assignment" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M7 3.75h7l4 4v12.5H7a2 2 0 0 1-2-2v-12.5a2 2 0 0 1 2-2Z"/>
@@ -346,7 +346,7 @@
             </span>
           </a>
 
-          <a class="app-row" href="apps/domestic-global-ai-workbench/">
+          <a class="app-row" href="#" onclick="return launchApp('ai',8767)">
             <span class="app-ava agents" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="5" r="2.25"/>
@@ -478,6 +478,28 @@
         setInterval(loadDash, 30000);
       });
     })();
+  </script>
+  <script>
+    // 启动本机应用：先同步开一个空白窗口保留用户手势，等后端把应用拉起后再跳转，避免弹窗被拦截
+    window.launchApp = function (app, port) {
+      var w = window.open('about:blank', '_blank');
+      fetch('/api/launch?app=' + encodeURIComponent(app))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.ok) {
+            var url = d.url || ('http://127.0.0.1:' + port + '/');
+            if (w) { w.location = url; } else { window.location.href = url; }
+          } else {
+            if (w) { w.close(); }
+            alert((d && d.msg) || '启动失败');
+          }
+        })
+        .catch(function (e) {
+          if (w) { w.close(); }
+          alert('启动失败：' + e.message + '\n\n请用桌面快捷方式打开本页（需要本地门户服务）。');
+        });
+      return false;
+    };
   </script>
 </body>
 </html>
