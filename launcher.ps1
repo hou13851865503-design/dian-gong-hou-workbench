@@ -124,32 +124,77 @@ if ($env:WB_LAUNCHER_TEST -eq '1') {
     exit 0
 }
 
-$edge = Find-Edge
-try {
-    if ($edge) {
-        # App 形式（无地址栏）。沿用现有 Edge 配置：新建独立 profile 会触发 Edge 首次运行欢迎页，
-        # 反而看不到应用窗口（实测：新 profile 里没有 "First Run" 标记 = 走了欢迎流程）。
-        $edgeArgs = @(
-            "--app=$url",
-            '--window-size=1120,860',
-            '--no-first-run',
-            '--no-default-browser-check'
-        )
-        Start-Process -FilePath $edge -ArgumentList $edgeArgs | Out-Null
-        Write-Log "opened in Edge app mode: $url"
-    } else {
-        Start-Process -FilePath $url | Out-Null
-        Write-Log "edge not found; opened in default browser: $url"
+function Find-Chrome {
+    $cands = @(
+        (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe'),
+        (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe')
+    )
+    $pf86 = ${env:ProgramFiles(x86)}
+    if ($pf86) { $cands += (Join-Path $pf86 'Google\Chrome\Application\chrome.exe') }
+    foreach ($c in $cands) {
+        if ($c -and (Test-Path -LiteralPath $c)) { return $c }
     }
-} catch {
-    Write-Log "app-mode open failed: $($_.Exception.Message); falling back to normal window"
-    try {
-        if ($edge) {
-            Start-Process -FilePath $edge -ArgumentList @('--new-window', $url) | Out-Null
-        } else {
-            Start-Process -FilePath $url | Out-Null
+    return $null
+}
+
+function Open-AppWindow {
+    param([string]$Url)
+
+    # 优先 Chrome：它支持「独立实例 + --app」，能稳定开出无地址栏的应用窗口。
+    # Edge 是单实例模型，--app 会被转发给已运行的 Edge 而退化成普通窗口（实测确认）。
+    $chrome = Find-Chrome
+    if ($chrome) {
+        $pf = Join-Path $env:LOCALAPPDATA 'DianGongHouWorkbench\ChromeApp'
+        try {
+            New-Item -ItemType Directory -Force -Path $pf | Out-Null
+            # 预置 First Run 标记，否则会走首次运行欢迎页，应用窗口被欢迎页盖住
+            $sentinel = Join-Path $pf 'First Run'
+            if (-not (Test-Path -LiteralPath $sentinel)) {
+                New-Item -ItemType File -Path $sentinel -Force | Out-Null
+            }
+            $a = @(
+                "--app=$Url",
+                '--window-size=1120,860',
+                '--window-position=120,80',
+                ('--user-data-dir="{0}"' -f $pf),
+                '--no-first-run',
+                '--no-default-browser-check',
+                '--disable-sync'
+            )
+            Start-Process -FilePath $chrome -ArgumentList $a | Out-Null
+            Write-Log "opened in Chrome app mode: $Url (profile=$pf)"
+            return $true
+        } catch {
+            Write-Log "chrome app mode failed: $($_.Exception.Message)"
         }
+    }
+
+    $edge = Find-Edge
+    if ($edge) {
+        try {
+            Start-Process -FilePath $edge -ArgumentList @("--app=$Url", '--window-size=1120,860', '--window-position=120,80') | Out-Null
+            Write-Log "opened in Edge app mode: $Url"
+            return $true
+        } catch {
+            Write-Log "edge app mode failed: $($_.Exception.Message)"
+        }
+        try {
+            Start-Process -FilePath $edge -ArgumentList @('--new-window', $Url) | Out-Null
+            Write-Log "opened in Edge normal window: $Url"
+            return $true
+        } catch {
+            Write-Log "edge normal window failed: $($_.Exception.Message)"
+        }
+    }
+
+    try {
+        Start-Process -FilePath $Url | Out-Null
+        Write-Log "opened in default browser: $Url"
+        return $true
     } catch {
-        Write-Log "fallback open failed: $($_.Exception.Message)"
+        Write-Log "open failed: $($_.Exception.Message)"
+        return $false
     }
 }
+
+[void](Open-AppWindow -Url $url)
