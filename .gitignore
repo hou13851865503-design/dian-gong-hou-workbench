@@ -5,3 +5,4 @@ Thumbs.db
 .DS_Store
 __pycache__/
 *.pyc
+portal_launcher.log

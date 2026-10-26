@@ -1,14 +1,23 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 # 工作台启动器
-# 作用：拉起本地门户服务（portal_server.py），然后用 Edge 应用窗口打开门户页。
-# 这样界面就是网页门户本身（原生 DPI 渲染，清晰；与 GitHub 上的截图一致），
-# 且门户里的「打开」按钮能真正启动两个应用（由本地服务负责）。
-# 若找不到 Python，则退化为直接用浏览器打开门户文件（此时「打开」按钮不可用）。
+# 1) 拉起本地门户服务 portal_server.py（pythonw，后台）
+# 2) 用「不经过系统代理」的 HTTP 请求确认门户页真的返回 200
+# 3) 确认无误后再交给浏览器打开 —— 避免浏览器拿到未就绪的地址而显示错误页
+# 4) 若服务起不来，退化为直接打开本地 HTML（页面仍能看，只是启动按钮不可用）
 
 $root = $PSScriptRoot
 $portalPage = Join-Path $root '电工猴的此思妙想工作台.html'
 $serverPy = Join-Path $root 'portal_server.py'
+$logPath = Join-Path $root 'portal_launcher.log'
+
+function Write-Log {
+    param([string]$Message)
+    try {
+        $line = '{0}  {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
+        Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
+    } catch { }
+}
 
 function Test-Port {
     param([int]$Port)
@@ -23,11 +32,19 @@ function Test-Port {
     } catch { return $false }
 }
 
-function Test-Portal {
-    param([int]$Port)
+function Test-Http {
+    param([int]$Port, [string]$Path = '/')
     try {
-        $r = Invoke-WebRequest -Uri ("http://127.0.0.1:{0}/api/health" -f $Port) -TimeoutSec 2 -UseBasicParsing
-        return ($r.StatusCode -eq 200)
+        $req = [System.Net.HttpWebRequest]::Create(('http://127.0.0.1:{0}{1}' -f $Port, $Path))
+        $req.Proxy = $null            # 关键：不走系统/环境代理，直连本机
+        $req.Timeout = 1500
+        $req.ReadWriteTimeout = 1500
+        $req.Method = 'GET'
+        $req.KeepAlive = $false
+        $resp = $req.GetResponse()
+        $code = [int]$resp.StatusCode
+        $resp.Close()
+        return ($code -eq 200)
     } catch { return $false }
 }
 
@@ -66,44 +83,58 @@ function Find-Edge {
 $pythonw = $null
 if (Test-Path -LiteralPath $serverPy) { $pythonw = Find-Pythonw }
 
-$serverPort = 0
+$port = 0
 for ($p = 8770; $p -le 8790; $p++) {
-    if (Test-Portal $p) { $serverPort = $p; break }
+    if (Test-Http $p) { $port = $p; break }
 }
 
-if ($serverPort -eq 0 -and $pythonw) {
+if ($port -eq 0 -and $pythonw) {
     for ($p = 8770; $p -le 8790; $p++) {
         if (Test-Port $p) { continue }
         try {
             $argline = '-u "{0}" --port {1}' -f $serverPy, $p
             Start-Process -FilePath $pythonw -ArgumentList $argline -WorkingDirectory $root -WindowStyle Hidden | Out-Null
-        } catch { continue }
-        for ($i = 0; $i -lt 30; $i++) {
-            Start-Sleep -Milliseconds 200
-            if (Test-Portal $p) { $serverPort = $p; break }
+            Write-Log "started portal server on $p (pid process spawned)"
+        } catch {
+            Write-Log "failed to start portal server on ${p}: $($_.Exception.Message)"
+            continue
         }
-        if ($serverPort -gt 0) { break }
+        $deadline = (Get-Date).AddSeconds(25)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 250
+            if (Test-Http $p) { $port = $p; break }
+        }
+        if ($port -gt 0) { break }
+        Write-Log "portal server on $p did not answer within 25s"
     }
 }
 
-if ($serverPort -gt 0) {
-    $url = "http://127.0.0.1:$serverPort/"
-    $target = $url
+if ($port -gt 0) {
+    $url = 'http://127.0.0.1:{0}/' -f $port
+    Write-Log "portal ready at $url"
 } else {
     $url = $portalPage
-    $target = ([System.Uri]$portalPage).AbsoluteUri
+    Write-Log "portal server unavailable; falling back to local file"
 }
 
 if ($env:WB_LAUNCHER_TEST -eq '1') {
-    Write-Output "PYTHONW=$pythonw"
-    Write-Output "PORT=$serverPort"
-    Write-Output "URL=$url"
+    Write-Output ('PYTHONW=' + $pythonw)
+    Write-Output ('PORT=' + $port)
+    Write-Output ('URL=' + $url)
     exit 0
 }
 
 $edge = Find-Edge
-if ($edge) {
-    Start-Process -FilePath $edge -ArgumentList @("--app=$target", '--window-size=1120,840')
-} else {
-    Start-Process -FilePath $url
+try {
+    if ($edge) {
+        # --new-window 保证独立窗口；网络错误时不复用已有标签而显示空白
+        Start-Process -FilePath $edge -ArgumentList @('--new-window', $url) | Out-Null
+        Write-Log "opened in Edge: $url"
+    } else {
+        Start-Process -FilePath $url | Out-Null
+        Write-Log "opened in default browser: $url"
+    }
+} catch {
+    Write-Log "open failed: $($_.Exception.Message); trying shell open"
+    Start-Process -FilePath $url | Out-Null
 }
