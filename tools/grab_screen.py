@@ -18,6 +18,7 @@ import struct
 import sys
 import time
 import zlib
+from pathlib import Path
 
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
@@ -125,11 +126,47 @@ def write_png(path: str, width: int, height: int, rgb: bytes) -> None:
         stream.write(png)
 
 
+def dark_ratio(rgb: bytes) -> float:
+    samples = dark = 0
+    for index in range(0, len(rgb) - 2, 291):
+        if max(rgb[index], rgb[index + 1], rgb[index + 2]) < 30:
+            dark += 1
+        samples += 1
+    return dark / samples if samples else 0.0
+
+
 def main() -> int:
     args = sys.argv[1:]
+
+    # --check [关键词] [--out 文件]：判定窗口是否黑屏（供启动器调用）
+    if args and args[0] == "--check":
+        rest = args[1:]
+        out_file = None
+        if "--out" in rest:
+            index = rest.index("--out")
+            if index + 1 < len(rest):
+                out_file = rest[index + 1]
+            rest = rest[:index] + rest[index + 2:]
+        keyword = rest[0] if rest else "工作台"
+        matches = list_windows(keyword)
+        if not matches:
+            result, code = "NOWINDOW", 2
+        else:
+            width, height, rgb = capture_pixels(matches[0][0])
+            ratio = dark_ratio(rgb)
+            result = f"{'BLACK' if ratio > 0.9 else 'OK'} {ratio:.0%} {width}x{height}"
+            code = 1 if ratio > 0.9 else 0
+        # 先写结果文件：pythonw 下 sys.stdout 为 None，print 会抛异常
+        if out_file:
+            Path(out_file).write_text(result, encoding="utf-8")
+        try:
+            print(result)
+        except Exception:
+            pass
+        return code
+
     if not args:
-        windows = list_windows()
-        for hwnd, title in windows:
+        for hwnd, title in list_windows():
             print(hwnd, title)
         return 0
     out_path = args[-1]

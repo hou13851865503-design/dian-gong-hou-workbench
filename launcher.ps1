@@ -74,6 +74,54 @@ function Find-Pythonw {
     return $null
 }
 
+function Find-Python {
+    $pw = Find-Pythonw
+    if ($pw) {
+        $py = Join-Path (Split-Path -Parent $pw) 'python.exe'
+        if (Test-Path -LiteralPath $py) { return $py }
+    }
+    $cmd = Get-Command 'python.exe' -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
+function Close-PortalChrome {
+    Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*DianGongHouWorkbench*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Test-BlackScreen {
+    # 用屏幕像素判断是否真黑屏（CDP 截图和窗口句柄都看不出黑屏）
+    # 返回 $true=黑屏 / $false=正常 / $null=无法判断
+    # 注意：不能用 Start-Process -RedirectStandardOutput——环境里同时存在
+    # http_proxy 和 HTTP_PROXY 时，PowerShell 构造环境块会抛"关键字重复"。
+    $grab = Join-Path $root 'tools\grab_screen.py'
+    $pyw = Find-Pythonw
+    if (-not $pyw -or -not (Test-Path -LiteralPath $grab)) { return $null }
+    $outFile = Join-Path $env:TEMP 'wb_pixel_check.txt'
+    try {
+        if (Test-Path -LiteralPath $outFile) { Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue }
+        Start-Process -FilePath $pyw -ArgumentList @($grab, '--check', '--out', $outFile) -WindowStyle Hidden | Out-Null
+        for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Milliseconds 200
+            if (Test-Path -LiteralPath $outFile) { break }
+        }
+        if (-not (Test-Path -LiteralPath $outFile)) {
+            Write-Log "pixel check produced no result"
+            return $null
+        }
+        $out = ([string](Get-Content -LiteralPath $outFile -Raw)).Trim()
+        if ($out -match '^BLACK') { return $true }
+        if ($out -match '^OK') { return $false }
+        Write-Log "pixel check inconclusive: $out"
+        return $null
+    } catch {
+        Write-Log "pixel check failed: $($_.Exception.Message)"
+        return $null
+    }
+}
+
 function Find-Edge {
     $cands = @()
     $pf86 = ${env:ProgramFiles(x86)}
@@ -179,28 +227,39 @@ function Open-AppWindow {
             # 清理上次异常退出留下的单实例锁，否则新实例会立刻退出
             Get-ChildItem -LiteralPath $pf -Filter 'Singleton*' -Force -ErrorAction SilentlyContinue |
                 ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
-            $a = @(
-                "--app=$Url",
-                '--window-size=1120,860',
-                '--window-position=120,80',
-                ('--user-data-dir="{0}"' -f $pf),
-                '--no-first-run',
-                '--no-default-browser-check',
-                '--disable-sync'
-            )
-            Start-Process -FilePath $chrome -ArgumentList $a | Out-Null
-            if (Wait-AppWindow -Seconds 8) {
-                Write-Log "chrome app window ready: $Url"
+            for ($attempt = 1; $attempt -le 2; $attempt++) {
+                $a = @(
+                    "--app=$Url",
+                    '--window-size=1120,860',
+                    '--window-position=120,80',
+                    ('--user-data-dir="{0}"' -f $pf),
+                    '--no-first-run',
+                    '--no-default-browser-check',
+                    '--disable-sync'
+                )
+                Start-Process -FilePath $chrome -ArgumentList $a | Out-Null
+                if (-not (Wait-AppWindow -Seconds 8)) {
+                    Write-Log "attempt ${attempt}: window not detected"
+                    continue
+                }
+                $black = Test-BlackScreen
+                if ($black -eq $true -and $attempt -lt 2) {
+                    Write-Log "attempt ${attempt}: window renders black; restarting chrome"
+                    Close-PortalChrome
+                    Start-Sleep -Milliseconds 1200
+                    continue
+                }
+                if ($black -eq $true) {
+                    Write-Log "attempt ${attempt}: still black; giving up on chrome"
+                    break
+                }
+                $pixel = 'skipped'
+                if ($black -eq $false) { $pixel = 'ok' }
+                Write-Log "chrome app window ready: $Url (attempt $attempt, pixel=$pixel)"
                 return $true
             }
-            # 参数可能被策略/驱动吞掉：降级为普通新窗口，再验证一次
-            Write-Log "chrome app window not detected in 8s; retry with --new-window"
-            Start-Process -FilePath $chrome -ArgumentList @('--new-window', $Url) | Out-Null
-            if (Wait-AppWindow -Seconds 8) {
-                Write-Log "chrome normal window ready (fallback): $Url"
-                return $true
-            }
-            Write-Log "chrome window still not detected; falling back to Edge/default browser"
+            Close-PortalChrome
+            Write-Log "chrome window unusable; falling back to Edge/default browser"
         } catch {
             Write-Log "chrome app mode failed: $($_.Exception.Message)"
         }
