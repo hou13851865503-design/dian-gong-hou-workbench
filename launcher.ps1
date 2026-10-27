@@ -32,19 +32,24 @@ function Test-Port {
     } catch { return $false }
 }
 
-function Test-Http {
-    param([int]$Port, [string]$Path = '/')
+function Test-Portal {
+    param([int]$Port)
+    # 只判断"/ 返回 200"会把别的本地服务（例如 8787 上的 New API）误认成门户，
+    # 因此必须校验 /api/health 里的 portal 标识。
     try {
-        $req = [System.Net.HttpWebRequest]::Create(('http://127.0.0.1:{0}{1}' -f $Port, $Path))
-        $req.Proxy = $null            # 关键：不走系统/环境代理，直连本机
-        $req.Timeout = 1500
-        $req.ReadWriteTimeout = 1500
+        $req = [System.Net.HttpWebRequest]::Create(('http://127.0.0.1:{0}/api/health' -f $Port))
+        $req.Proxy = $null            # 不走系统/环境代理，直连本机
+        $req.Timeout = 1200
+        $req.ReadWriteTimeout = 1200
         $req.Method = 'GET'
         $req.KeepAlive = $false
         $resp = $req.GetResponse()
-        $code = [int]$resp.StatusCode
+        $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
+        $body = $reader.ReadToEnd()
+        $reader.Close()
         $resp.Close()
-        return ($code -eq 200)
+        $data = $body | ConvertFrom-Json
+        return ([string]$data.portal -eq 'workbench')
     } catch { return $false }
 }
 
@@ -85,7 +90,7 @@ if (Test-Path -LiteralPath $serverPy) { $pythonw = Find-Pythonw }
 
 $port = 0
 for ($p = 8770; $p -le 8790; $p++) {
-    if (Test-Http $p) { $port = $p; break }
+    if (Test-Portal $p) { $port = $p; break }
 }
 
 if ($port -eq 0 -and $pythonw) {
@@ -102,7 +107,7 @@ if ($port -eq 0 -and $pythonw) {
         $deadline = (Get-Date).AddSeconds(25)
         while ((Get-Date) -lt $deadline) {
             Start-Sleep -Milliseconds 250
-            if (Test-Http $p) { $port = $p; break }
+            if (Test-Portal $p) { $port = $p; break }
         }
         if ($port -gt 0) { break }
         Write-Log "portal server on $p did not answer within 25s"

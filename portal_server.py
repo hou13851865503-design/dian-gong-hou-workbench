@@ -136,7 +136,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, PORTAL_HTML.read_bytes(), "text/html; charset=utf-8")
 
         if path == "/api/health":
-            return self._json({"ok": True, "root": str(ROOT)})
+            # portal 字段用于让启动器识别"这是我们自己的服务"，
+            # 避免把别的程序（例如 8787 上的 New API）误当成本地门户复用。
+            return self._json({"ok": True, "portal": "workbench", "version": 1, "root": str(ROOT)})
 
         if path == "/api/launch":
             app = (qs.get("app") or [""])[0]

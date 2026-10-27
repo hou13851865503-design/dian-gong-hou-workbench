@@ -34,15 +34,8 @@
       font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
       -webkit-font-smoothing: antialiased;
       color: var(--ink);
-      /* 光晕直接画在背景上：全屏 filter:blur + 动画的独立图层在部分 GPU 上会合成失败导致整页黑屏 */
-      background:
-        radial-gradient(36vw 36vw at 12% 16%, rgba(31,160,138,.16), transparent 60%),
-        radial-gradient(30vw 30vw at 88% 10%, rgba(189,128,30,.10), transparent 60%),
-        radial-gradient(40vw 40vw at 80% 90%, rgba(22,124,107,.14), transparent 60%),
-        radial-gradient(60vw 60vw at 85% -10%, rgba(31,160,138,.10), transparent 60%),
-        radial-gradient(50vw 50vw at -10% 110%, rgba(22,124,107,.08), transparent 55%),
-        var(--canvas);
-      background-attachment: fixed;
+      /* 纯色背景：不使用 fixed 背景/全屏渐变层/模糊层，避免部分 GPU 合成失败导致整屏黑 */
+      background-color: var(--canvas);
       display: flex;
       align-items: center;
       justify-content: center;
