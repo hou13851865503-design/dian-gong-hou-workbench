@@ -11,10 +11,13 @@
   2. portal_server 的健康检查必须带 portal 标识
      —— 否则启动器会把别人的本地服务误认成门户。
   3. 启动器必须校验门户身份、必须验证窗口真的起来、不得使用 --disable-gpu
-     —— --disable-gpu 会让 Chrome 启动即退出。
+     —— --disable-gpu 会让 Chrome 启动即退出（--disable-gpu-compositing 不受限）。
   4. launcher.ps1 必须是 UTF-8 BOM + CRLF
      —— 否则 PowerShell 5.1 读中文乱码。
   5. 不得出现 `| Remove-Item -Force`（管道无输入会报 missing path operand 并中断流程）。
+  6. 启动器必须：单实例互斥、按句柄判定、等页面标题加载、profile 自愈、失败存诊断包、
+     像素探测用唯一临时文件 —— 这几条分别对应"双击两次互相杀窗口"、"抓到别的窗口"、
+     "页面没加载被当成黑屏"、"profile 损坏打开空白窗口"、"黑屏后无从排查"、"读到上次结果"。
 """
 from __future__ import annotations
 
@@ -56,17 +59,32 @@ def code_lines(path: Path, encoding: str = "utf-8-sig"):
         yield number, line
 
 
+LAUNCHER_REQUIRED = [
+    ("Open-ChromeWindow", "打开窗口后没有验证是否成功（并且要能识别『Chrome 启动即退出』）"),
+    ("data.portal", "缺少门户身份校验（data.portal），可能误复用其他服务端口"),
+    ("Local\\DianGongHouWorkbenchLauncher", "缺少单实例互斥，双击两次会互相杀掉对方的窗口"),
+    ("--hwnd", "像素判定没有按窗口句柄，可能抓到别的窗口（如桌宠）"),
+    ("Wait-PageLoaded", "缺少页面加载判定，页面没加载会被误当成黑屏"),
+    ("Initialize-ChromeProfile", "缺少 profile 自愈，状态文件损坏会打开空白窗口"),
+    ("Save-Diagnostics", "失败时没有保存诊断包，黑屏无从排查"),
+    ("[guid]::NewGuid()", "临时结果文件不是唯一命名，可能读到上一次的残留结果"),
+]
+
+
 def check_launcher(problems: list[str]) -> None:
     text = LAUNCHER.read_text(encoding="utf-8-sig")
-    if "Wait-AppWindow" not in text:
-        problems.append(f"{LAUNCHER.name}: 缺少 Wait-AppWindow，打开窗口后没有验证是否成功")
-    if "data.portal" not in text:
-        problems.append(f"{LAUNCHER.name}: 缺少门户身份校验（data.portal），可能误复用其他服务端口")
+    for token, why in LAUNCHER_REQUIRED:
+        if token not in text:
+            problems.append(f"{LAUNCHER.name}: {why}")
     for number, line in code_lines(LAUNCHER):
-        if "--disable-gpu" in line:
+        # 只禁 --disable-gpu 本身（会让 Chrome 启动即退出）；
+        # --disable-gpu-compositing 是黑屏时的软件合成降级手段，允许使用。
+        if re.search(r"--disable-gpu(?![\w-])", line):
             problems.append(f"{LAUNCHER.name}:{number} 使用 --disable-gpu（会导致 Chrome 启动即退出）")
         if re.search(r"\|\s*Remove-Item\s+-Force", line):
             problems.append(f"{LAUNCHER.name}:{number} 使用 `| Remove-Item -Force`，无匹配项会中断流程，应改用 ForEach-Object")
+        if "wb_pixel_check.txt" in line:
+            problems.append(f"{LAUNCHER.name}:{number} 使用固定临时文件名，会读到上一次的黑屏判定结果")
 
 
 def check_launcher_encoding(problems: list[str]) -> None:

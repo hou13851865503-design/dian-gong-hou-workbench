@@ -63,34 +63,49 @@ git clone https://github.com/hou13851865503-design/qq-email-homework-assistant.g
 这些规则对应曾经真实发生过的故障，**改动相关文件前请先跑自检**：
 
 ```bash
-python tools/lint_portal.py     # 静态守卫：CSS/服务标识/启动器流程/编码
-python tools/verify_portal.py   # 真实渲染自检：起服务 + 真 Chrome + CDP 断言 + 屏幕像素检查
+python tools/lint_portal.py       # 静态守卫：CSS/服务标识/启动器流程/编码
+python tools/verify_portal.py     # 真实渲染自检：起服务 + 真 Chrome + CDP 断言 + 屏幕像素检查
+python tools/verify_launcher.py   # 启动器验收：模拟"刚重启"，9 项可判定断言（含遮挡反证）
 python tools/grab_screen.py 工作台 shot.png   # 单独抓某个窗口的屏幕像素，排查黑屏用
 ```
 
-### 四条硬规则
+### 六条硬规则
 
 1. **页面禁用**：全屏 `filter: blur()`、`backdrop-filter`、`background-attachment: fixed`。
    这类合成层在部分 GPU 上会整屏渲染成黑色——而无头浏览器截图完全正常，极易误判。
 2. **服务必须可识别**：`/api/health` 返回 `{"portal": "workbench", ...}`。
    启动器只能复用通过身份校验的端口，否则会把窗口开到别人（例如 8787 上的 New API）的页面上。
-3. **启动器必须验证结果**：打开窗口后检查进程 + 主窗口句柄，失败要降级重试，不能"启动完就当成功"。
+3. **"窗口出现"不等于"启动成功"**：还要等窗口标题变成工作台标题（页面真加载），
+   否则拿到的是标题为 `127.0.0.1_/` 的空白窗口。
 4. **判断黑屏只能看屏幕像素**：Chrome DevTools 的 `Page.captureScreenshot` 截的是**渲染器输出**，
    屏幕真黑时它仍可能返回正常画面。必须用 `tools/grab_screen.py`（BitBlt 屏幕 DC）取证。
+5. **像素只有在"窗口在最前、且没被盖住"时才是证据**：BitBlt 是按矩形拷屏幕像素，
+   窗口被别的窗口压住时拷到的是别人。9 宫格采样 ≥5 格被盖 → 返回 `OCCLUDED`，
+   此时**不判黑屏、不杀进程**（被杀掉的往往是一个正常窗口）。
+6. **"无法判定"不能当成"成功"**：检测失败要如实记为 `像素无法判定`，保留窗口交给用户；
+   既不谎报成功，也不能凭一次采样就杀掉窗口。
 
 ### 已知坑（都已在代码里规避）
 
 | 坑 | 现象 | 规避 |
 |---|---|---|
-| Chrome `--disable-gpu` | 启动后立即退出 | 不使用该参数 |
+| Chrome `--disable-gpu` | 启动后立即退出 | 不使用该参数（`--disable-gpu-compositing` 允许） |
 | Edge 单实例 | `--app` 被转发，退化成普通窗口 | 用 Chrome `--app` + 独立 profile |
 | 新建 Chrome profile | 弹首次运行欢迎页盖住应用窗口 | 预置 `First Run` 标记 |
+| 刚杀掉 Chrome 就重开 | 新进程 ExitCode=0、无窗口（被退出的实例吞掉） | 等 chrome 进程清零 + 600ms，识别后撤避重试 |
+| 固定临时结果文件 | 读到上一次的黑屏判定结果 | 每次 `[guid]` 唯一文件名 |
+| `MainWindowHandle` 认窗口 | Chrome 应用窗口有时句柄为 0，误判"没窗口" | 用 `EnumWindows` 按 PID 找窗口 |
+| 21 个端口各盲等 1.5s | 双击后 30 秒才起服务 | 先只看 8770，被占用才往后扫 |
+| `http_proxy`/`HTTP_PROXY` 同时存在 | `Start-Process -Redirect*` 抛"关键字重复" | 子进程结果一律写文件回传 |
 | PowerShell 管道 `\| Remove-Item -Force` | 无匹配项时报 missing path operand 并中断 | 改用 `ForEach-Object` |
 | `.ps1` 无 BOM | PowerShell 5.1 中文乱码 | 保存为 UTF-8 BOM + CRLF |
 
 ### 排障顺序
 
-1. 看 `portal_launcher.log` 最后几行（记录了端口、就绪、窗口验证结果）；
+1. 看 `portal_launcher.log` 最后几行（端口、就绪、页面加载、像素判定、置前结果）；
 2. `curl --noproxy '*' http://127.0.0.1:8770/api/health` 确认服务身份；
-3. 跑 `python tools/verify_portal.py`，它会明确告诉你页面是否真的渲染出来了。
+3. 跑 `python tools/verify_portal.py`，确认页面是否真的渲染出来；
+4. 跑 `python tools/verify_launcher.py`，确认"冷启动下双击"整条链路；
+5. 仍然黑屏 → 看 `docs/diag/<时间戳>/`（截图 + 窗口清单 + 环境），完整手册见
+   `docs/工作台黑屏排查手册.md`。
 
