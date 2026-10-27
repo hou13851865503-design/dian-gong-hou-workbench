@@ -55,6 +55,13 @@ def check_server_marker(problems: list[str]) -> None:
     text = PORTAL_SERVER.read_text(encoding="utf-8")
     if '"portal": "workbench"' not in text:
         problems.append(f"{PORTAL_SERVER.name}: /api/health 缺少 portal 标识，启动器无法识别服务身份")
+    # Windows 的 SO_REUSEADDR 允许第二个进程绑同一端口 → 会静默起两个服务。
+    # 所以必须用关掉 allow_reuse_address 的子类来构造服务，不能直接用 ThreadingHTTPServer。
+    if re.search(r"srv\s*=\s*ThreadingHTTPServer\(", text):
+        problems.append(f"{PORTAL_SERVER.name}: 直接用 ThreadingHTTPServer 绑定端口，"
+                        "Windows 的 SO_REUSEADDR 会让第二个进程也绑成功（应改用 PortalServer）")
+    if "allow_reuse_address" not in text:
+        problems.append(f"{PORTAL_SERVER.name}: 没有显式关闭 allow_reuse_address，端口会失去独占性")
 
 
 def code_lines(path: Path, encoding: str = "utf-8-sig"):

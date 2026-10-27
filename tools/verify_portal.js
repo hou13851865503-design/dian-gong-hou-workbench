@@ -2,10 +2,16 @@
 // 用法: node verify_portal.js <debugPort> <outPng>
 const fs = require('fs');
 
+// Windows 上 stdout 是管道时 console.log 是异步写，紧跟 process.exit 会把输出丢掉，
+// 表现为"node 退出码 0 但父进程读到空字符串"（实测间歇性复现）。用同步写。
+const out = (obj) => {
+  try { fs.writeSync(1, JSON.stringify(obj) + '\n'); } catch (e) { /* 忽略写失败 */ }
+};
+
 (async () => {
   const [, , debugPort, outPng] = process.argv;
   if (!debugPort || !outPng) {
-    console.log(JSON.stringify({ ok: false, error: 'usage: node verify_portal.js <debugPort> <outPng>' }));
+    out({ ok: false, error: 'usage: node verify_portal.js <debugPort> <outPng>' });
     process.exit(2);
   }
 
@@ -13,13 +19,13 @@ const fs = require('fs');
   try {
     list = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
   } catch (e) {
-    console.log(JSON.stringify({ ok: false, error: 'cdp unreachable: ' + e.message }));
+    out({ ok: false, error: 'cdp unreachable: ' + e.message });
     process.exit(3);
   }
 
   const page = list.find(t => t.type === 'page' && !String(t.url).startsWith('devtools'));
   if (!page) {
-    console.log(JSON.stringify({ ok: false, error: 'no page target', urls: list.map(t => t.url) }));
+    out({ ok: false, error: 'no page target', urls: list.map(t => t.url) });
     process.exit(4);
   }
 
@@ -61,6 +67,6 @@ const fs = require('fs');
   fs.writeFileSync(outPng, Buffer.from(shot.data, 'base64'));
   info.bytes = fs.statSync(outPng).size;
   info.ok = true;
-  console.log(JSON.stringify(info));
+  out(info);
   process.exit(0);
 })();

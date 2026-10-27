@@ -55,6 +55,10 @@ SWP_NOMOVE = 0x0002
 GA_ROOT = 2
 
 
+class CaptureError(RuntimeError):
+    """抓屏失败（窗口不存在/尺寸为 0 等）。调用方可以捕获后降级处理。"""
+
+
 class BITMAPINFOHEADER(ctypes.Structure):
     _fields_ = [
         ("biSize", wt.DWORD), ("biWidth", wt.LONG), ("biHeight", wt.LONG),
@@ -93,6 +97,27 @@ def window_title(hwnd: int) -> str:
     buf = ctypes.create_unicode_buffer(length + 1)
     user32.GetWindowTextW(hwnd, buf, length + 1)
     return buf.value
+
+
+def window_size(hwnd: int) -> tuple[int, int]:
+    rect = wt.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    return rect.right - rect.left, rect.bottom - rect.top
+
+
+def pick_window(keyword: str = "") -> tuple[int, str] | None:
+    """挑一个"真的能截屏"的窗口。
+
+    同一个标题可能对应多个窗口：Chrome 的中间态窗口、被最小化的窗口都可能
+    报 0x0，直接取 matches[0] 会随机拿到一个截不了图的，导致"像素检查跳过"。
+    这里取面积最大的那个可见窗口。
+    """
+    best: tuple[int, int, str] | None = None
+    for hwnd, title in list_windows(keyword):
+        width, height = window_size(hwnd)
+        if width > 0 and height > 0 and (best is None or width * height > best[0]):
+            best = (width * height, hwnd, title)
+    return (best[1], best[2]) if best else None
 
 
 def bring_to_front(hwnd: int, settle: float = 0.45) -> bool:
@@ -159,7 +184,9 @@ def capture_pixels(hwnd: int, settle: float = 0.9) -> tuple[int, int, bytes]:
     user32.GetWindowRect(hwnd, ctypes.byref(rect))
     width, height = rect.right - rect.left, rect.bottom - rect.top
     if width <= 0 or height <= 0:
-        raise SystemExit("窗口尺寸无效")
+        # 这里必须抛普通异常，不能 SystemExit：本模块也被 verify_portal 当库调用，
+        # SystemExit 会把整个校验进程带走（表现为"只输出一句窗口尺寸无效就没了"）。
+        raise CaptureError(f"窗口尺寸无效：{width}x{height}")
 
     screen_dc = user32.GetDC(0)
     mem_dc = gdi32.CreateCompatibleDC(screen_dc)
@@ -386,10 +413,10 @@ def dispatch(args: list[str], out_file: str | None) -> int:
         hwnd = int(hwnd_value or 0)
         if not hwnd:
             keyword = rest[0] if rest else "工作台"
-            matches = list_windows(keyword)
-            if not matches:
+            picked = pick_window(keyword)
+            if not picked:
                 return emit("NOWINDOW 0% 0x0", 2, out_file)
-            hwnd = matches[0][0]
+            hwnd = picked[0]
         return check_window(hwnd, out_file, settle=settle)
 
     if not args:
@@ -398,10 +425,10 @@ def dispatch(args: list[str], out_file: str | None) -> int:
         return 0
     out_path = args[-1]
     keyword = "".join(args[:-1])
-    matches = list_windows(keyword)
-    if not matches:
+    picked = pick_window(keyword)
+    if not picked:
         return emit(f"NOWINDOW 未找到标题包含「{keyword}」的可见窗口", 1, out_file)
-    hwnd, title = matches[0]
+    hwnd, title = picked
     width, height = capture(hwnd, out_path)
     return emit(f"captured {width}x{height} '{title}' -> {out_path}", 0, out_file)
 

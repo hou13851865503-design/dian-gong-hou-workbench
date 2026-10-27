@@ -185,6 +185,20 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, target.read_bytes(), ctype)
 
 
+class PortalServer(ThreadingHTTPServer):
+    """门户的 HTTP 服务端口必须有"独占"语义。
+
+    HTTPServer 默认 allow_reuse_address = 1（即 SO_REUSEADDR），而 **Windows 上
+    SO_REUSEADDR 的语义和 Linux 不同**：它允许第二个进程绑上一个已被占用的端口。
+    后果是"再点一次启动"会静默多起一个服务，两个进程同时 serve 同一端口，
+    请求随机落到哪个进程全看内核——表现为页面偶发旧内容、状态对不上，
+    而且 bind 永远不报错，后面"是不是自己已经在跑"的判断永远走不到。
+    关掉它，端口被占时 bind 才会真正抛 OSError。
+    """
+    allow_reuse_address = sys.platform != "win32"
+    daemon_threads = True
+
+
 def main() -> None:
     global DRY_RUN
     import argparse
@@ -201,7 +215,7 @@ def main() -> None:
     candidates = [args.port] + [p for p in PORT_RANGE if p != args.port]
     for p in candidates:
         try:
-            srv = ThreadingHTTPServer(("127.0.0.1", p), Handler)
+            srv = PortalServer(("127.0.0.1", p), Handler)
             args.port = p
             break
         except OSError:
