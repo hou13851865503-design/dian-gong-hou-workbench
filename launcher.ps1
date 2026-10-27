@@ -152,6 +152,9 @@ function Open-AppWindow {
             if (-not (Test-Path -LiteralPath $sentinel)) {
                 New-Item -ItemType File -Path $sentinel -Force | Out-Null
             }
+            # 清理上次异常退出留下的单实例锁，否则新实例会立刻退出
+            Get-ChildItem -LiteralPath $pf -Filter 'Singleton*' -Force -ErrorAction SilentlyContinue |
+                ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
             $a = @(
                 "--app=$Url",
                 '--window-size=1120,860',

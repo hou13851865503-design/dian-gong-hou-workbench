@@ -34,29 +34,22 @@
       font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
       -webkit-font-smoothing: antialiased;
       color: var(--ink);
+      /* 光晕直接画在背景上：全屏 filter:blur + 动画的独立图层在部分 GPU 上会合成失败导致整页黑屏 */
       background:
+        radial-gradient(36vw 36vw at 12% 16%, rgba(31,160,138,.16), transparent 60%),
+        radial-gradient(30vw 30vw at 88% 10%, rgba(189,128,30,.10), transparent 60%),
+        radial-gradient(40vw 40vw at 80% 90%, rgba(22,124,107,.14), transparent 60%),
         radial-gradient(60vw 60vw at 85% -10%, rgba(31,160,138,.10), transparent 60%),
         radial-gradient(50vw 50vw at -10% 110%, rgba(22,124,107,.08), transparent 55%),
         var(--canvas);
+      background-attachment: fixed;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 28px 18px;
     }
 
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      z-index: -1;
-      pointer-events: none;
-      background:
-        radial-gradient(36vw 36vw at 12% 16%, rgba(31,160,138,.16), transparent 60%),
-        radial-gradient(30vw 30vw at 88% 10%, rgba(189,128,30,.10), transparent 60%),
-        radial-gradient(40vw 40vw at 80% 90%, rgba(22,124,107,.14), transparent 60%);
-      filter: blur(8px);
-      animation: auroraDrift 22s ease-in-out infinite alternate;
-    }
+    /* 光晕已并入 body 背景：不再使用全屏 filter:blur 图层（部分 GPU 会整屏黑） */
 
     @keyframes auroraDrift {
       0%   { transform: translate3d(0, 0, 0) scale(1); }
