@@ -2,20 +2,18 @@
 
 # 工作台启动器
 #
-# 这套流程是踩了一年黑屏坑之后定下来的，每一步都对应一次真实故障：
+# 启动路径按"关键路径最短"排序，每一步都对应一次真实故障：
 #  1) 单实例互斥 —— 双击两次时两个启动器会互相 Close 对方刚打开的窗口
-#  2) 先按 TCP 快速筛端口，再用 /api/health 的 portal 标识确认身份
-#     —— 不能只看端口是否 200，也别对 21 个端口每个盲等 1.5 秒（那是几十秒空转）
-#  3) 用 Start-Process -PassThru 拿到真实进程号认窗口，不依赖 WMI
-#     —— 开机瞬间 WMI 可能很慢；而且 Chrome 偶尔会"启动即退出"（被上一个实例吞掉），
-#        这种情况要能识别出来并重试，而不是干等 25 秒
-#  4) 窗口出现后还要等「页面标题」变成工作台标题
-#     —— 标题还是 127.0.0.1 说明页面根本没加载，这和"画出来了但是黑的"是两码事
-#  5) 把窗口强制置前 —— 开机后一堆自启程序抢焦点，窗口在别人后面，用户就是"看不到"
-#  6) 只有「窗口在最前、中心点属于自己」时采像素才有效
-#     —— 否则拷到的是覆盖窗口的像素，会把正常页面误判成黑屏，进而杀掉好窗口
-#  7) 判黑屏要连续两次、且先强制重绘；仍黑才降级为软件合成重开
-#  8) 彻底失败时保存诊断包（截图/进程/环境/日志），再退 Edge 或默认浏览器
+#  2) 路径解析结果缓存在 env.json —— 每次 Get-Command 扫 PATH 要几百毫秒
+#  3) 先按 TCP 快速判断端口，再用 /api/health 的 portal 标识确认身份
+#     —— 不能只看端口是否 200（8787 上可能跑着别的服务）
+#  4) 门户服务「立刻拉起」，再用 TCP 监听当就绪信号
+#     —— 不先等 HTTP 200，也不对空端口盲等；浏览器可以在监听一出现就启动，两件事并行
+#  5) 用 Start-Process -PassThru 拿进程号，再用 EnumWindows 按 PID 等窗口
+#     —— .NET 的 MainWindowHandle 对 Chrome 应用窗口不可靠，会误判"没窗口"
+#  6) 等窗口标题变成工作台标题 —— 标题还是 127.0.0.1 说明页面没加载，不是渲染问题
+#  7) 置前 + 只在「窗口在最前、未被遮挡」时采像素 —— 否则拷到的是别人的像素
+#  8) 判黑屏要连续两次；仍黑才降级软件合成重开；失败存诊断包并退 Edge/默认浏览器
 
 $root = $PSScriptRoot
 $portalPage = Join-Path $root '电工猴的此思妙想工作台.html'
@@ -23,8 +21,9 @@ $serverPy = Join-Path $root 'portal_server.py'
 $logPath = Join-Path $root 'portal_launcher.log'
 $diagRoot = Join-Path $root 'docs\diag'
 $grabScript = Join-Path $root 'tools\grab_screen.py'
-$profileDir = Join-Path $env:LOCALAPPDATA 'DianGongHouWorkbench\ChromeApp'
-# 页面标题里稳定出现的片段，用来判断"页面真的加载完了"
+$stateDir = Join-Path $env:LOCALAPPDATA 'DianGongHouWorkbench'
+$cacheFile = Join-Path $stateDir 'env.json'
+$profileDir = Join-Path $stateDir 'ChromeApp'
 $pageTitleHint = '电工猴'
 $startedAt = Get-Date
 
@@ -32,7 +31,7 @@ function Write-Log {
     param([string]$Message)
     try {
         $elapsed = ((Get-Date) - $startedAt).TotalSeconds
-        $line = '{0}  [+{1,6:0.0}s] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $elapsed, $Message
+        $line = '{0}  [+{1,6:0.00}s] {2}' -f (Get-Date -Format 'HH:mm:ss.fff'), $elapsed, $Message
         Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
     } catch { }
 }
@@ -52,16 +51,27 @@ if (-not $holdsLock) {
 }
 
 function Test-Port {
-    param([int]$Port)
+    param([int]$Port, [int]$TimeoutMs = 200)
     try {
         $c = New-Object System.Net.Sockets.TcpClient
         $i = $c.BeginConnect('127.0.0.1', $Port, $null, $null)
-        $ok = $i.AsyncWaitHandle.WaitOne(200, $false)
+        $ok = $i.AsyncWaitHandle.WaitOne($TimeoutMs, $false)
         if (-not $ok) { $c.Close(); return $false }
         $c.EndConnect($i)
         $c.Close()
         return $true
     } catch { return $false }
+}
+
+function Wait-Port {
+    # 60ms 粒度：服务一监听就返回，不用等到下一个整秒
+    param([int]$Port, [int]$Seconds = 40)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Port $Port 100) { return $true }
+        Start-Sleep -Milliseconds 60
+    }
+    return $false
 }
 
 function Test-Portal {
@@ -85,10 +95,47 @@ function Test-Portal {
     } catch { return $false }
 }
 
+function Get-CachedPath {
+    # 上次解析出来的程序路径，命中就省掉 Get-Command 扫 PATH 的时间
+    param([string]$Key)
+    try {
+        if (Test-Path -LiteralPath $cacheFile) {
+            $cache = Get-Content -LiteralPath $cacheFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            $value = [string]$cache.$Key
+            if ($value -and (Test-Path -LiteralPath $value)) { return $value }
+        }
+    } catch { }
+    return $null
+}
+
+function Set-CachedPath {
+    param([string]$Key, [string]$Value)
+    try {
+        New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+        $cache = @{}
+        if (Test-Path -LiteralPath $cacheFile) {
+            try {
+                $existing = Get-Content -LiteralPath $cacheFile -Raw -Encoding UTF8 | ConvertFrom-Json
+                foreach ($prop in $existing.PSObject.Properties) { $cache[$prop.Name] = $prop.Value }
+            } catch { }
+        }
+        $cache[$Key] = $Value
+        ($cache | ConvertTo-Json -Compress) | Set-Content -LiteralPath $cacheFile -Encoding UTF8
+    } catch { }
+}
+
 function Find-Pythonw {
-    if ($env:PYTHONW_PATH -and (Test-Path -LiteralPath $env:PYTHONW_PATH)) { return $env:PYTHONW_PATH }
+    $cached = Get-CachedPath -Key 'pythonw'
+    if ($cached) { return $cached }
+    if ($env:PYTHONW_PATH -and (Test-Path -LiteralPath $env:PYTHONW_PATH)) {
+        Set-CachedPath -Key 'pythonw' -Value $env:PYTHONW_PATH
+        return $env:PYTHONW_PATH
+    }
     $cmd = Get-Command 'pythonw.exe' -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
+    if ($cmd) {
+        Set-CachedPath -Key 'pythonw' -Value $cmd.Source
+        return $cmd.Source
+    }
     $roots = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\Python'),
         (Join-Path $env:ProgramFiles 'Python')
@@ -100,24 +147,18 @@ function Find-Pythonw {
                 ForEach-Object { Join-Path $_.FullName 'pythonw.exe' } |
                 Where-Object { Test-Path -LiteralPath $_ } |
                 Select-Object -First 1
-            if ($found) { return $found }
+            if ($found) {
+                Set-CachedPath -Key 'pythonw' -Value $found
+                return $found
+            }
         }
     }
     return $null
 }
 
-function Find-Python {
-    $pw = Find-Pythonw
-    if ($pw) {
-        $py = Join-Path (Split-Path -Parent $pw) 'python.exe'
-        if (Test-Path -LiteralPath $py) { return $py }
-    }
-    $cmd = Get-Command 'python.exe' -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    return $null
-}
-
 function Find-Chrome {
+    $cached = Get-CachedPath -Key 'chrome'
+    if ($cached) { return $cached }
     $cands = @(
         (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe'),
         (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe')
@@ -125,7 +166,10 @@ function Find-Chrome {
     $pf86 = ${env:ProgramFiles(x86)}
     if ($pf86) { $cands += (Join-Path $pf86 'Google\Chrome\Application\chrome.exe') }
     foreach ($c in $cands) {
-        if ($c -and (Test-Path -LiteralPath $c)) { return $c }
+        if ($c -and (Test-Path -LiteralPath $c)) {
+            Set-CachedPath -Key 'chrome' -Value $c
+            return $c
+        }
     }
     return $null
 }
@@ -142,7 +186,6 @@ function Find-Edge {
 }
 
 function Get-AppChromePids {
-    # 优先用启动器自己拿到的进程号；WMI 只作补充（开机瞬间可能很慢甚至失败）
     $pids = @()
     if ($script:launchedPid) { $pids += [int]$script:launchedPid }
     try {
@@ -151,31 +194,6 @@ function Get-AppChromePids {
             ForEach-Object { $_.ProcessId })
     } catch { }
     return @($pids | Sort-Object -Unique)
-}
-
-function Get-AppWindows {
-    # 只认「本应用窗口」：①启动器拉起的进程；②标题已是工作台标题；③标题还是纯 host（页面加载中）
-    param($Proc)
-    $list = @()
-    $pids = @()
-    if ($Proc -and -not $Proc.HasExited) { $pids += $Proc.Id }
-    $pids += Get-AppChromePids
-    foreach ($proc in @(Get-Process chrome -ErrorAction SilentlyContinue)) {
-        if ($proc.MainWindowTitle -like "*$pageTitleHint*") { $pids += $proc.Id }
-        elseif ($proc.MainWindowTitle -like '127.0.0.1*') { $pids += $proc.Id }
-    }
-    $pids = @($pids | Sort-Object -Unique)
-    if ($pids.Count -eq 0) { return $list }
-    foreach ($proc in @(Get-Process -Id $pids -ErrorAction SilentlyContinue)) {
-        if ($proc -and $proc.MainWindowHandle -ne 0) {
-            $list += [pscustomobject]@{
-                Hwnd  = $proc.MainWindowHandle
-                Pid   = $proc.Id
-                Title = [string]$proc.MainWindowTitle
-            }
-        }
-    }
-    return $list
 }
 
 function Close-AppChrome {
@@ -196,7 +214,7 @@ function Close-AppChrome {
         if (@(Get-Process chrome -ErrorAction SilentlyContinue).Count -eq 0) { break }
         Start-Sleep -Milliseconds 250
     }
-    Start-Sleep -Milliseconds 600
+    Start-Sleep -Milliseconds 500
     $script:launchedPid = 0
 }
 
@@ -250,6 +268,16 @@ function Start-ChromeApp {
         '--no-default-browser-check',
         '--disable-sync',
         '--no-proxy-server',
+        # 下面是"少干活"开关：应用窗口不需要组件更新/后台联网/扩展/崩溃上报，
+        # 关掉能省掉启动时的后台任务与网络等待
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-default-apps',
+        '--disable-extensions',
+        '--no-service-autorun',
+        '--no-pings',
+        '--disable-breakpad',
+        '--metrics-recording-only',
         '--disable-features=CalculateNativeWinOcclusion'
     )
     if ($Extra) { $a += $Extra }
@@ -259,47 +287,6 @@ function Start-ChromeApp {
         Write-Log "启动 chrome 失败：$($_.Exception.Message)"
         return $null
     }
-}
-
-function Open-ChromeWindow {
-    # 打开并确认窗口出现。窗口由 python 侧用 EnumWindows 按进程号找
-    # （.NET 的 MainWindowHandle 对 Chrome 应用窗口不可靠，会漏判成"没窗口"）。
-    param([string]$Url, [string]$Extra = '')
-    for ($try = 1; $try -le 3; $try++) {
-        $proc = Start-ChromeApp -Url $Url -Extra $Extra
-        if (-not $proc) { return $null }
-        $script:launchedPid = $proc.Id
-        $result = Invoke-WindowTool -Arguments @('--wait-window', '--pid', [string]$proc.Id, '--hint', $pageTitleHint, '--timeout', '12') -TimeoutSeconds 25
-        Write-Log ("第 {0} 次启动：窗口查找结果 = {1}" -f $try, $result)
-        if ($result -match '^HWND\s+(\d+)\s+(\d+)\s+(.*)$') {
-            return [pscustomobject]@{
-                Hwnd  = [IntPtr][int64]$matches[1]
-                Pid   = [int]$matches[2]
-                Title = $matches[3].Trim()
-            }
-        }
-        if ($proc.HasExited) {
-            # 被上一个（正在退出的）实例吞掉了：等它彻底消失再试
-            Write-Log ("第 {0} 次启动 chrome 立即退出（ExitCode={1}），退避后重试" -f $try, $proc.ExitCode)
-            Start-Sleep -Milliseconds (900 * $try)
-            continue
-        }
-        Write-Log ("第 {0} 次启动 chrome 12 秒内没有出现窗口" -f $try)
-        return $null
-    }
-    return $null
-}
-
-function Wait-PageLoaded {
-    # 窗口标题变成页面标题，才算页面真的加载出来了。
-    # 页面没加载时标题是 "127.0.0.1"（实测），据此区分
-    # "服务/代理没通导致空白窗口" 和 "页面画出来了但是黑屏"。
-    param([IntPtr]$Hwnd, [int]$Seconds = 15)
-    $result = Invoke-WindowTool -Arguments @('--wait-title', '--hwnd', [string]$Hwnd, '--hint', $pageTitleHint, '--timeout', [string]$Seconds) -TimeoutSeconds ($Seconds + 10)
-    if ($result -match '^LOADED\s+(\d)\s+title=(.*)$') {
-        return [pscustomobject]@{ Loaded = ($matches[1] -eq '1'); Title = $matches[2].Trim() }
-    }
-    return [pscustomobject]@{ Loaded = $false; Title = $result }
 }
 
 function Invoke-WindowTool {
@@ -319,7 +306,7 @@ function Invoke-WindowTool {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     try {
         while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Milliseconds 250
+            Start-Sleep -Milliseconds 100
             if (Test-Path -LiteralPath $outFile) { break }
         }
         if (-not (Test-Path -LiteralPath $outFile)) {
@@ -334,15 +321,53 @@ function Invoke-WindowTool {
     }
 }
 
-function Focus-AppWindow {
-    param([IntPtr]$Hwnd)
-    $result = Invoke-WindowTool -Arguments @('--focus', '--hwnd', [string]$Hwnd) -TimeoutSeconds 15
-    Write-Log "置前结果：$result"
+function Open-ChromeWindow {
+    # 打开并确认窗口出现。窗口由 python 侧用 EnumWindows 按进程号找
+    # （.NET 的 MainWindowHandle 对 Chrome 应用窗口不可靠，会漏判成"没窗口"）。
+    param([string]$Url, [string]$Extra = '')
+    for ($try = 1; $try -le 3; $try++) {
+        $proc = Start-ChromeApp -Url $Url -Extra $Extra
+        if (-not $proc) { return $null }
+        $script:launchedPid = $proc.Id
+        $result = Invoke-WindowTool -Arguments @('--wait-window', '--pid', [string]$proc.Id, '--hint', $pageTitleHint, '--timeout', '12') -TimeoutSeconds 20
+        if ($result -match '^HWND\s+(\d+)\s+(\d+)\s+(.*)$') {
+            return [pscustomobject]@{
+                Hwnd  = [IntPtr][int64]$matches[1]
+                Pid   = [int]$matches[2]
+                Title = $matches[3].Trim()
+            }
+        }
+        Write-Log ("第 {0} 次启动：窗口查找结果 = {1}" -f $try, $result)
+        if ($proc.HasExited) {
+            # 被上一个（正在退出的）实例吞掉了：等它彻底消失再试
+            Write-Log ("第 {0} 次启动 chrome 立即退出（ExitCode={1}），退避后重试" -f $try, $proc.ExitCode)
+            Start-Sleep -Milliseconds (900 * $try)
+            continue
+        }
+        Write-Log ("第 {0} 次启动 chrome 12 秒内没有出现窗口" -f $try)
+        return $null
+    }
+    return $null
+}
+
+function Wait-PageLoaded {
+    # 等窗口标题变成页面标题，才认为页面真的加载出来了。
+    # 页面没加载时标题是 "127.0.0.1_/"（实测），据此区分
+    # "服务/代理没通导致空白窗口" 和 "页面画出来了但是黑屏"。
+    # 这一步内部会顺手把窗口置前，省掉一次 pythonw 启动。
+    param([IntPtr]$Hwnd, [int]$Seconds = 15)
+    $result = Invoke-WindowTool -Arguments @('--wait-title', '--hwnd', [string]$Hwnd, '--hint', $pageTitleHint, '--timeout', [string]$Seconds) -TimeoutSeconds ($Seconds + 8)
+    if ($result -match '^LOADED\s+(\d)\s+title=(.*)$') {
+        return [pscustomobject]@{ Loaded = ($matches[1] -eq '1'); Title = $matches[2].Trim() }
+    }
+    return [pscustomobject]@{ Loaded = $false; Title = $result }
 }
 
 function Get-RenderVerdict {
+    # 采样最坏情况约 3.3s（3 次尝试 × 置前 + 遮挡复检），8s 足够；
+    # 给 20s 只会让"工具自己崩了"这种情况白等十几秒，看起来就是启动卡很久。
     param([IntPtr]$Hwnd)
-    $result = Invoke-WindowTool -Arguments @('--check', '--hwnd', [string]$Hwnd) -TimeoutSeconds 20
+    $result = Invoke-WindowTool -Arguments @('--check', '--hwnd', [string]$Hwnd, '--settle', '0.2') -TimeoutSeconds 8
     Write-Log "像素判定：$result"
     if ($result -match '^BLACK') { return 'BLACK' }
     if ($result -match '^OK') { return 'OK' }
@@ -370,7 +395,6 @@ function Save-Diagnostics {
         $text = @(
             ('ProxyEnable=' + $ie.ProxyEnable),
             ('ProxyServer=' + $ie.ProxyServer),
-            ('AutoConfigURL=' + $ie.AutoConfigURL),
             ('env HTTP_PROXY=' + $env:HTTP_PROXY),
             ('env http_proxy=' + $env:http_proxy),
             ('chrome=' + (Find-Chrome)),
@@ -405,48 +429,51 @@ function Find-WindowByTitle {
     } catch { return @() }
 }
 
-# ---------- 1. 保证门户服务在跑 ----------
+# ---------- 1. 服务：立刻拉起，边跑边确认 ----------
 $script:launchedPid = 0
-$pythonw = $null
-if (Test-Path -LiteralPath $serverPy) { $pythonw = Find-Pythonw }
-Write-Log ("启动器开始：pythonw={0} chrome={1}" -f $pythonw, (Find-Chrome))
+$pythonw = Find-Pythonw
+Write-Log ("启动器开始：pythonw={0}" -f $pythonw)
 
 $port = 0
-# 常见情况：8770 上就是我们的门户，一次请求即可，不做 21 个端口的扫描
-if (Test-Portal 8770) { $port = 8770 }
-if ($port -eq 0 -and (Test-Port 8770)) {
-    # 8770 被别的程序占了（例如 New API），往后找已经在跑的自己的实例
-    for ($p = 8771; $p -le 8790; $p++) {
-        if (-not (Test-Port $p)) { continue }
-        if (Test-Portal $p) { $port = $p; break }
+$serverProc = $null
+$busy = $false
+
+# 只有端口已经有人在听，才去问身份；避免对空端口发 HTTP 请求白等
+if (Test-Port 8770 120) {
+    if (Test-Portal 8770) {
+        $port = 8770
+        Write-Log '复用已在运行的门户（8770）'
+    } else {
+        $busy = $true
+        Write-Log '8770 被别的程序占用，改从 8771 起'
     }
 }
 
 if ($port -eq 0 -and $pythonw) {
-    for ($p = 8770; $p -le 8790; $p++) {
-        if (Test-Port $p) { continue }
-        try {
-            $argline = '-u "{0}" --port {1}' -f $serverPy, $p
-            Start-Process -FilePath $pythonw -ArgumentList $argline -WorkingDirectory $root -WindowStyle Hidden | Out-Null
-            Write-Log "已拉起门户服务，端口 $p"
-        } catch {
-            Write-Log "拉起门户服务失败（端口 ${p}）：$($_.Exception.Message)"
-            continue
+    $launchPort = 8770
+    if ($busy) { $launchPort = 8771 }
+    try {
+        $argline = '-u "{0}" --port {1}' -f $serverPy, $launchPort
+        $serverProc = Start-Process -FilePath $pythonw -ArgumentList $argline -WorkingDirectory $root -WindowStyle Hidden -PassThru
+        Write-Log ("已拉起门户服务，端口 {0}" -f $launchPort)
+    } catch {
+        Write-Log "拉起门户服务失败：$($_.Exception.Message)"
+    }
+    if ($serverProc -and (Wait-Port $launchPort 40)) {
+        $port = $launchPort
+    } elseif ($serverProc) {
+        # 服务工作线程可能挪到了后面的端口（被占），扫一遍确认
+        for ($p = 8770; $p -le 8790; $p++) {
+            if ((Test-Port $p 100) -and (Test-Portal $p)) { $port = $p; break }
         }
-        # 冷启动（刚开机、杀毒软件还在扫）可以很慢，给足 40 秒
-        $deadline = (Get-Date).AddSeconds(40)
-        while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Milliseconds 300
-            if (Test-Portal $p) { $port = $p; break }
-        }
-        if ($port -gt 0) { break }
-        Write-Log "门户服务在 ${p} 端口 40 秒内没有响应"
+        if ($port -gt 0) { Write-Log ("门户实际监听在 {0}" -f $port) }
+        else { Write-Log '门户服务 40 秒内没有可用端口' }
     }
 }
 
 if ($port -gt 0) {
     $url = 'http://127.0.0.1:{0}/' -f $port
-    Write-Log "门户已就绪：$url"
+    Write-Log ("门户已就绪：{0}" -f $url)
 } else {
     $url = $portalPage
     Write-Log '门户服务不可用，退化为打开本地文件（启动按钮会不可用）'
@@ -480,25 +507,15 @@ for ($attempt = 1; $attempt -le 2; $attempt++) {
     }
     Write-Log ("第 {0} 轮：窗口已出现 pid={1} 句柄={2}" -f $attempt, $window.Pid, $window.Hwnd)
 
-    Focus-AppWindow -Hwnd $window.Hwnd
-
     $loaded = Wait-PageLoaded -Hwnd $window.Hwnd -Seconds 15
     Write-Log ("第 {0} 轮：页面加载={1} 标题={2}" -f $attempt, $loaded.Loaded, $loaded.Title)
     if (-not $loaded.Loaded) {
-        # 窗口在、页面没加载 —— 这不是黑屏问题，重开窗口也没用
         $pageStuck = $true
         break
     }
 
     $verdict = Get-RenderVerdict -Hwnd $window.Hwnd
     if ($verdict -eq 'OCCLUDED') {
-        Focus-AppWindow -Hwnd $window.Hwnd
-        $verdict = Get-RenderVerdict -Hwnd $window.Hwnd
-    }
-    if ($verdict -eq 'BLACK') {
-        # 首帧可能还没上屏，等一拍再判一次
-        Start-Sleep -Milliseconds 900
-        Focus-AppWindow -Hwnd $window.Hwnd
         $verdict = Get-RenderVerdict -Hwnd $window.Hwnd
     }
     if ($verdict -eq 'OK') {
@@ -507,6 +524,14 @@ for ($attempt = 1; $attempt -le 2; $attempt++) {
         break
     }
     if ($verdict -eq 'BLACK') {
+        # 首帧可能还没上屏，等一拍再判一次
+        Start-Sleep -Milliseconds 500
+        $verdict = Get-RenderVerdict -Hwnd $window.Hwnd
+        if ($verdict -eq 'OK') {
+            Write-Log ("第 {0} 轮：渲染正常（复检），启动成功" -f $attempt)
+            $succeeded = $true
+            break
+        }
         Write-Log ("第 {0} 轮：连续采样都是黑屏" -f $attempt)
         continue
     }
@@ -523,7 +548,6 @@ if (-not $succeeded) {
 }
 
 if (-not $succeeded -and $pageStuck) {
-    # 页面根本没加载出来：直接用默认浏览器打开本地文件，至少能进得去
     try {
         Start-Process -FilePath $portalPage | Out-Null
         Write-Log '页面未能从本地服务加载，已用默认浏览器打开本地文件'
@@ -540,7 +564,6 @@ if (-not $succeeded) {
             Start-Process -FilePath $edge -ArgumentList @(('--app={0}' -f $url), '--window-size=1120,860', '--window-position=120,80') | Out-Null
             Write-Log "已尝试 Edge 应用窗口：$url"
             Start-Sleep -Milliseconds 2500
-            # Edge 是单实例模型，--app 可能被已经在后台跑的 Edge 吞掉
             if ((Find-WindowByTitle -Keyword $pageTitleHint).Count -eq 0) {
                 Start-Process -FilePath $edge -ArgumentList @('--new-window', $url) | Out-Null
                 Write-Log 'Edge 没有出现应用窗口，改用普通窗口'
@@ -562,9 +585,9 @@ if (-not $succeeded) {
     }
 }
 
-if (-not $succeeded) {
-    Write-Log '全部打开方式都失败，请查看 docs\diag 下的诊断包'
-}
+$totalSeconds = ((Get-Date) - $startedAt).TotalSeconds
+if ($succeeded) { $resultText = '成功' } else { $resultText = '失败' }
+Write-Log ('启动流程结束：总耗时 {0:0.00}s，结果={1}' -f $totalSeconds, $resultText)
 
 try {
     if ($mutex -and $holdsLock) { [void]$mutex.ReleaseMutex() }

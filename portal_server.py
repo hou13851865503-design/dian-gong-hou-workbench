@@ -194,19 +194,9 @@ def main() -> None:
     args = ap.parse_args()
     DRY_RUN = bool(args.dry_run)
 
-    # 已有实例在服务就直接退出：避免反复双击在多个端口上堆出多个服务进程。
-    # 仅在使用默认端口区间时启用；测试/自检传入其他端口时不干扰在跑的实例。
-    # 注意：必须先做极短的 TCP 探测——被防火墙丢包的端口会让 HTTP 探测白等，
-    # 21 个端口逐个等 0.4s 会让启动慢到 8s+。
-    if args.port in PORT_RANGE:
-        for p in PORT_RANGE:
-            if p == args.port or not port_open(p, timeout=0.05):
-                continue
-            if portal_running(p):
-                print(f"portal already running at {p}; exit")
-                return
-
-    # 端口可能被别的程序占用（例如 8787 上的 New API）：自动换下一个
+    # 直接试着绑定，绑定成功就是最快路径（启动耗时第一优先）。
+    # 只有绑定失败（端口被占）时才去问"是不是我们自己已经在跑"：
+    # 反过来先扫一圈端口，被防火墙丢包时会白等 1 秒以上。
     srv = None
     candidates = [args.port] + [p for p in PORT_RANGE if p != args.port]
     for p in candidates:
@@ -215,6 +205,9 @@ def main() -> None:
             args.port = p
             break
         except OSError:
+            if portal_running(p):
+                print(f"portal already running at {p}; exit")
+                return
             continue
     if srv is None:
         raise SystemExit("no free port in range")

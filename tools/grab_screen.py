@@ -22,7 +22,8 @@
     BLACK      98% 1120x860     窗口就在最前面，但整片是黑的
     OCCLUDED                    窗口不在最前/被盖住，无法判断
     NOWINDOW                    窗口不存在或不可见
-退出码：0=OK 1=BLACK 2=NOWINDOW 3=OCCLUDED
+    TOOLFAIL <原因>             脚本自身出错（已兜底，不会让启动器干等超时）
+退出码：0=OK 1=BLACK 2=NOWINDOW 3=OCCLUDED 4=TOOLFAIL
 """
 from __future__ import annotations
 
@@ -94,8 +95,11 @@ def window_title(hwnd: int) -> str:
     return buf.value
 
 
-def bring_to_front(hwnd: int) -> bool:
-    """置前 + 置顶闪一下 + 强制重画，尽量让窗口真的显示在用户眼前。"""
+def bring_to_front(hwnd: int, settle: float = 0.45) -> bool:
+    """置前 + 置顶闪一下 + 强制重画，尽量让窗口真的显示在用户眼前。
+
+    settle 是等窗口真正重绘完成的时间；启动路径上会调小，避免白等。
+    """
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, SW_RESTORE)
     foreground = user32.GetForegroundWindow()
@@ -113,7 +117,7 @@ def bring_to_front(hwnd: int) -> bool:
     user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
     user32.InvalidateRect(hwnd, None, True)
     user32.UpdateWindow(hwnd)
-    time.sleep(0.45)
+    time.sleep(settle)
     return user32.GetForegroundWindow() == hwnd
 
 
@@ -144,12 +148,12 @@ def occluded(hwnd: int) -> bool:
     return occlusion_hits(hwnd) >= 5
 
 
-def capture_pixels(hwnd: int) -> tuple[int, int, bytes]:
+def capture_pixels(hwnd: int, settle: float = 0.9) -> tuple[int, int, bytes]:
     """把窗口当前显示的内容从屏幕 DC 拷出来（RGB 字节流）。"""
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, SW_RESTORE)
     user32.SetForegroundWindow(hwnd)
-    time.sleep(0.9)
+    time.sleep(settle)
 
     rect = wt.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(rect))
@@ -234,13 +238,15 @@ def emit(result: str, code: int, out_file: str | None) -> int:
     return code
 
 
-def check_window(hwnd: int, out_file: str | None, attempts: int = 3) -> int:
+def check_window(hwnd: int, out_file: str | None, attempts: int = 3, settle: float = 0.45) -> int:
     if not hwnd or not user32.IsWindowVisible(hwnd):
         return emit("NOWINDOW 0% 0x0", 2, out_file)
     # 采样期间可能被别的窗口抢一下前台，重试几次即可；
     # 只有在"确实在最前"的时候采到的像素才算证据。
     for attempt in range(1, attempts + 1):
-        bring_to_front(hwnd)
+        # 已经在最前就不用再抬一次（抬一次要等它重绘，白花 0.15s）
+        if user32.GetForegroundWindow() != hwnd:
+            bring_to_front(hwnd, settle=0.15)
         if user32.GetForegroundWindow() != hwnd:
             time.sleep(0.3)
             continue
@@ -248,7 +254,7 @@ def check_window(hwnd: int, out_file: str | None, attempts: int = 3) -> int:
         if hits >= 5:
             time.sleep(0.3)
             continue
-        width, height, rgb = capture_pixels(hwnd)
+        width, height, rgb = capture_pixels(hwnd, settle=settle)
         if user32.GetForegroundWindow() != hwnd or occlusion_hits(hwnd) >= 5:
             time.sleep(0.3)
             continue
@@ -296,7 +302,15 @@ def wait_window(process_id: int, hint: str, timeout: float) -> str:
 
 
 def wait_title(hwnd: int, hint: str, timeout: float) -> str:
-    """等到窗口标题变成页面标题——只有页面真的加载了才会变。"""
+    """等到窗口标题变成页面标题——只有页面真的加载了才会变。
+
+    顺手把窗口置前：开机后自启程序会抢前台，窗口在别人后面用户就是"看不到"。
+    合并成一次调用还能省一次 pythonw 启动（约 0.3s）。
+    """
+    try:
+        bring_to_front(hwnd, settle=0.1)
+    except Exception:
+        pass
     deadline = time.time() + timeout
     title = ""
     while time.time() < deadline:
@@ -309,77 +323,87 @@ def wait_title(hwnd: int, hint: str, timeout: float) -> str:
     return f"LOADED 0 title={title}"
 
 
+def opt(rest: list[str], name: str, default: str = "") -> str:
+    """从参数列表里取 --name value。
+
+    单独抽出来是因为踩过坑：--settle 曾经只在某一个分支里赋值，
+    换个分支就成了未定义变量，脚本崩掉 → 不写结果文件 →
+    启动器白等到超时（实测多花 20 秒）。参数解析只留一份，就不会再出现。
+    """
+    if name in rest:
+        index = rest.index(name)
+        if index + 1 < len(rest):
+            return rest[index + 1]
+    return default
+
+
+def take_flag(rest: list[str], name: str) -> tuple[str, list[str]]:
+    """取出 --name value 并把它们从列表里删掉，返回值与剩余参数。"""
+    if name not in rest:
+        return "", rest
+    index = rest.index(name)
+    value = rest[index + 1] if index + 1 < len(rest) else ""
+    return value, rest[:index] + rest[index + 2:]
+
+
 def main() -> int:
     args = sys.argv[1:]
+    out_file = opt(args, "--out") or None
 
+    # 兜底：任何异常都要立刻写结果文件并退出。
+    # 否则启动器只能等到 20 秒超时，用户看到的就是"启动卡很久"。
+    try:
+        return dispatch(args, out_file)
+    except Exception as exc:  # noqa: BLE001
+        return emit(f"TOOLFAIL {type(exc).__name__}: {exc}", 4, out_file)
+
+
+def dispatch(args: list[str], out_file: str | None) -> int:
     if args and args[0] in ("--wait-window", "--wait-title"):
         rest = args[1:]
-
-        def option(name: str, default: str = "") -> str:
-            if name in rest:
-                index = rest.index(name)
-                if index + 1 < len(rest):
-                    return rest[index + 1]
-            return default
-
-        out_file = option("--out") or None
-        timeout = float(option("--timeout", "12") or 12)
+        timeout = float(opt(rest, "--timeout", "12") or 12)
         if args[0] == "--wait-window":
-            result = wait_window(int(option("--pid", "0") or 0), option("--hint"), timeout)
+            result = wait_window(int(opt(rest, "--pid", "0") or 0), opt(rest, "--hint"), timeout)
         else:
-            result = wait_title(int(option("--hwnd", "0") or 0), option("--hint"), timeout)
+            result = wait_title(int(opt(rest, "--hwnd", "0") or 0), opt(rest, "--hint"), timeout)
         return emit(result, 0 if not result.startswith(("NONE", "LOADED 0")) else 1, out_file)
 
     if args and args[0] == "--focus":
-        rest = args[1:]
-        hwnd = 0
-        if "--hwnd" in rest:
-            index = rest.index("--hwnd")
-            if index + 1 < len(rest):
-                hwnd = int(rest[index + 1])
+        hwnd_value, _ = take_flag(args[1:], "--hwnd")
+        hwnd = int(hwnd_value or 0)
         if not hwnd:
-            return emit("NOWINDOW", 2, None)
+            return emit("NOWINDOW", 2, out_file)
         ok = bring_to_front(hwnd)
         return emit(f"FOCUSED {1 if ok else 0} title={window_title(hwnd)}", 0 if ok else 3,
-                    rest[rest.index("--out") + 1] if "--out" in rest else None)
+                    out_file)
 
-    # --check [关键词] [--hwnd N] [--out 文件]：判定窗口是否黑屏（供启动器调用）
+    # --check [关键词] [--hwnd N] [--out 文件] [--settle 秒]：判定窗口是否黑屏
     if args and args[0] == "--check":
         rest = args[1:]
-        out_file = None
-        if "--out" in rest:
-            index = rest.index("--out")
-            if index + 1 < len(rest):
-                out_file = rest[index + 1]
-            rest = rest[:index] + rest[index + 2:]
-        hwnd = 0
-        if "--hwnd" in rest:
-            index = rest.index("--hwnd")
-            if index + 1 < len(rest):
-                hwnd = int(rest[index + 1])
-            rest = rest[:index] + rest[index + 2:]
+        settle_value, rest = take_flag(rest, "--settle")
+        settle = float(settle_value or 0.45)
+        hwnd_value, rest = take_flag(rest, "--hwnd")
+        hwnd = int(hwnd_value or 0)
         if not hwnd:
             keyword = rest[0] if rest else "工作台"
             matches = list_windows(keyword)
             if not matches:
                 return emit("NOWINDOW 0% 0x0", 2, out_file)
             hwnd = matches[0][0]
-        return check_window(hwnd, out_file)
+        return check_window(hwnd, out_file, settle=settle)
 
     if not args:
         for hwnd, title in list_windows():
-            print(hwnd, title)
+            emit(f"{hwnd} {title}", 0, out_file)
         return 0
     out_path = args[-1]
     keyword = "".join(args[:-1])
     matches = list_windows(keyword)
     if not matches:
-        print(f"未找到标题包含「{keyword}」的可见窗口")
-        return 1
+        return emit(f"NOWINDOW 未找到标题包含「{keyword}」的可见窗口", 1, out_file)
     hwnd, title = matches[0]
     width, height = capture(hwnd, out_path)
-    print(f"captured {width}x{height} '{title}' -> {out_path}")
-    return 0
+    return emit(f"captured {width}x{height} '{title}' -> {out_path}", 0, out_file)
 
 
 if __name__ == "__main__":

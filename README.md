@@ -63,9 +63,10 @@ git clone https://github.com/hou13851865503-design/qq-email-homework-assistant.g
 这些规则对应曾经真实发生过的故障，**改动相关文件前请先跑自检**：
 
 ```bash
-python tools/lint_portal.py       # 静态守卫：CSS/服务标识/启动器流程/编码
+python tools/lint_portal.py       # 静态守卫：CSS/服务标识/启动器流程/编码/窗口工具冒烟
 python tools/verify_portal.py     # 真实渲染自检：起服务 + 真 Chrome + CDP 断言 + 屏幕像素检查
 python tools/verify_launcher.py   # 启动器验收：模拟"刚重启"，9 项可判定断言（含遮挡反证）
+python tools/profile_startup.py   # 启动耗时剖析：按阶段拆分，定位瓶颈（--runs 3 / --cold）
 python tools/grab_screen.py 工作台 shot.png   # 单独抓某个窗口的屏幕像素，排查黑屏用
 ```
 
@@ -85,6 +86,32 @@ python tools/grab_screen.py 工作台 shot.png   # 单独抓某个窗口的屏�
 6. **"无法判定"不能当成"成功"**：检测失败要如实记为 `像素无法判定`，保留窗口交给用户；
    既不谎报成功，也不能凭一次采样就杀掉窗口。
 
+### 启动性能（实测，`python tools/profile_startup.py --runs 3`）
+
+| 指标 | 优化前 | 优化后 | 变化 |
+|---|---|---|---|
+| 热启动总耗时（中位数） | 7.57s（5.82–9.39s） | **2.66s**（2.48–2.78s） | −65% |
+| 冷启动总耗时（删 profile，模拟刚重启） | — | **1.66s**（1.52–1.80s） | — |
+| 点击 → 窗口可见 | ~6.5s | **0.71s** | −89% |
+| 点击 → 页面可用（标题变成工作台） | ~7.1s | **1.19s** | −83% |
+
+优化前日志里各阶段加起来只有 1.60s，却有 7.57s 总耗时——**差的 6 秒全花在"① 拉起服务"之前**：
+21 个端口逐个盲等 1.5s、再等 HTTP 200、再启动浏览器（全程串行）。现在的链路是：
+
+1. **服务先绑端口，浏览器立刻启动**：`portal_server` 绑定成功即算就绪，启动器用 TCP 监听（连得上）当信号，
+   不再等 HTTP 200；浏览器启动和服务启动并行，不再串行叠加。
+2. **路径缓存**：`pythonw` / `chrome` 的解析结果缓存在 `%LOCALAPPDATA%\DianGongHouWorkbench\env.json`，
+   省掉每次扫 PATH 的几百毫秒。
+3. **合并窗口操作**：置前合并进"等页面标题"，少启动一次 pythonw（约 0.25s）。
+4. **Chrome 少做事**：关闭后台网络/组件更新/默认应用/扩展/崩溃上报等启动期动作。
+5. **像素自检瘦身**：窗口已在最前就不再重复置前，采样等待 0.35s → 0.2s（最坏仍保留 3 次重试）。
+
+剩余瓶颈是**像素自检（约 1.0s）**——它是唯一能证明"不是黑屏"的环节，属于刻意的安全开销：
+此时窗口已经可见可用（1.19s 就到了），自检在后台完成，用户感知不到。
+
+> 说明：优化前的"点击 → 可见/可用"两行是按日志分段推算的（那 6 秒落在日志覆盖范围之外），
+> 不是直接测量值；优化后的数字是 `profile_startup.py` 连续 3 次实测的中位数。
+
 ### 已知坑（都已在代码里规避）
 
 | 坑 | 现象 | 规避 |
@@ -99,6 +126,8 @@ python tools/grab_screen.py 工作台 shot.png   # 单独抓某个窗口的屏�
 | `http_proxy`/`HTTP_PROXY` 同时存在 | `Start-Process -Redirect*` 抛"关键字重复" | 子进程结果一律写文件回传 |
 | PowerShell 管道 `\| Remove-Item -Force` | 无匹配项时报 missing path operand 并中断 | 改用 `ForEach-Object` |
 | `.ps1` 无 BOM | PowerShell 5.1 中文乱码 | 保存为 UTF-8 BOM + CRLF |
+| 工具脚本变量作用域 | `--settle` 只在一个分支里赋值，另一分支 `NameError` → 不写结果文件 → 启动器白等 20s 超时 | 参数解析统一走 `opt()/take_flag()`；`main()` 兜底捕获异常写 `TOOLFAIL`；`lint_portal.py` 对每个子命令做冒烟测试 |
+| 等 HTTP 200 才算服务就绪 | 服务其实早已监听，白等一轮握手/健康检查 | 绑定成功即算就绪，用 TCP 连得上当信号 |
 
 ### 排障顺序
 
