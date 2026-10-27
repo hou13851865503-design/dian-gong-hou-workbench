@@ -64,16 +64,19 @@ git clone https://github.com/hou13851865503-design/qq-email-homework-assistant.g
 
 ```bash
 python tools/lint_portal.py     # 静态守卫：CSS/服务标识/启动器流程/编码
-python tools/verify_portal.py   # 真实渲染自检：起服务 + 真 Chrome + CDP 截图与 DOM 断言
+python tools/verify_portal.py   # 真实渲染自检：起服务 + 真 Chrome + CDP 断言 + 屏幕像素检查
+python tools/grab_screen.py 工作台 shot.png   # 单独抓某个窗口的屏幕像素，排查黑屏用
 ```
 
-### 三条硬规则
+### 四条硬规则
 
 1. **页面禁用**：全屏 `filter: blur()`、`backdrop-filter`、`background-attachment: fixed`。
    这类合成层在部分 GPU 上会整屏渲染成黑色——而无头浏览器截图完全正常，极易误判。
 2. **服务必须可识别**：`/api/health` 返回 `{"portal": "workbench", ...}`。
    启动器只能复用通过身份校验的端口，否则会把窗口开到别人（例如 8787 上的 New API）的页面上。
 3. **启动器必须验证结果**：打开窗口后检查进程 + 主窗口句柄，失败要降级重试，不能"启动完就当成功"。
+4. **判断黑屏只能看屏幕像素**：Chrome DevTools 的 `Page.captureScreenshot` 截的是**渲染器输出**，
+   屏幕真黑时它仍可能返回正常画面。必须用 `tools/grab_screen.py`（BitBlt 屏幕 DC）取证。
 
 ### 已知坑（都已在代码里规避）
 

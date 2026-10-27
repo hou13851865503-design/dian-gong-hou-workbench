@@ -124,13 +124,38 @@ def main() -> int:
         if int(info.get("bytes") or 0) < 30000:
             problems.append(f"截图仅 {info.get('bytes')} 字节（疑似纯色/黑屏）")
 
+        # 真实屏幕像素检查：CDP 截的是渲染器输出，屏幕真的黑时它也可能返回正常画面，
+        # 所以必须再从屏幕 DC 抓一次窗口像素来兜底。
+        dark_ratio = None
+        try:
+            sys.path.insert(0, str(ROOT / "tools"))
+            from grab_screen import capture_pixels, list_windows  # noqa: E402
+
+            windows = list_windows("工作台")
+            if windows:
+                _w, _h, rgb = capture_pixels(windows[0][0])
+                samples = dark = 0
+                for index in range(0, len(rgb) - 2, 291):
+                    if max(rgb[index], rgb[index + 1], rgb[index + 2]) < 30:
+                        dark += 1
+                    samples += 1
+                dark_ratio = dark / samples if samples else 0.0
+                if dark_ratio > 0.9:
+                    problems.append(
+                        f"屏幕上 {dark_ratio:.0%} 的像素接近纯黑（真实黑屏；CDP 截图查不出这类问题）")
+            else:
+                print("! 未找到窗口，跳过屏幕像素检查")
+        except Exception as exc:  # 抓屏失败不应让整个检查失败
+            print("! 屏幕像素检查跳过：", exc)
+
         if problems:
             print("✗ 真实渲染检查未通过：")
             for item in problems:
                 print("  -", item)
             return 1
         print(f"✓ 真实渲染通过：title={info.get('title')} 文本={info.get('textLen')} "
-              f"背景={info.get('bg')} 截图={info.get('bytes')}B")
+              f"背景={info.get('bg')} 截图={info.get('bytes')}B "
+              f"屏幕暗像素={'-' if dark_ratio is None else f'{dark_ratio:.0%}'}")
         return 0
     finally:
         if chrome_proc and chrome_proc.poll() is None:

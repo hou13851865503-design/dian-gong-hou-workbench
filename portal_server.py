@@ -46,10 +46,14 @@ PORTAL_VERSION = 2
 PORT_RANGE = range(8770, 8791)
 
 
+# 必须绕过系统/环境代理：否则 http_proxy 会让 127.0.0.1 的探测走代理，启动时逐个端口超时
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def portal_running(port: int) -> bool:
     """判断该端口上是否已有本门户实例（必须校验身份，不能只看端口通不通）。"""
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=0.5) as resp:
+        with _LOCAL_OPENER.open(f"http://127.0.0.1:{port}/api/health", timeout=0.3) as resp:
             return json.loads(resp.read().decode("utf-8")).get("portal") == "workbench"
     except Exception:
         return False
@@ -192,9 +196,13 @@ def main() -> None:
 
     # 已有实例在服务就直接退出：避免反复双击在多个端口上堆出多个服务进程。
     # 仅在使用默认端口区间时启用；测试/自检传入其他端口时不干扰在跑的实例。
+    # 注意：必须先做极短的 TCP 探测——被防火墙丢包的端口会让 HTTP 探测白等，
+    # 21 个端口逐个等 0.4s 会让启动慢到 8s+。
     if args.port in PORT_RANGE:
         for p in PORT_RANGE:
-            if p != args.port and portal_running(p):
+            if p == args.port or not port_open(p, timeout=0.05):
+                continue
+            if portal_running(p):
                 print(f"portal already running at {p}; exit")
                 return
 
