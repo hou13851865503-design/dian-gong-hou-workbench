@@ -142,6 +142,25 @@ function Find-Chrome {
     return $null
 }
 
+function Wait-AppWindow {
+    # 验证"窗口真的出来了"：既有本 profile 的 Chrome 进程，且有可见主窗口句柄。
+    # 只 Start-Process 不验证 = 失败了也无声无息（之前 --disable-gpu 那样）。
+    param([int]$Seconds = 8)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $ids = (Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" -ErrorAction SilentlyContinue |
+                    Where-Object { $_.CommandLine -like '*DianGongHouWorkbench*' }).ProcessId
+            if ($ids) {
+                $win = Get-Process -Id $ids -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }
+                if ($win) { return $true }
+            }
+        } catch { }
+        Start-Sleep -Milliseconds 400
+    }
+    return $false
+}
+
 function Open-AppWindow {
     param([string]$Url)
 
@@ -170,8 +189,18 @@ function Open-AppWindow {
                 '--disable-sync'
             )
             Start-Process -FilePath $chrome -ArgumentList $a | Out-Null
-            Write-Log "opened in Chrome app mode: $Url (profile=$pf)"
-            return $true
+            if (Wait-AppWindow -Seconds 8) {
+                Write-Log "chrome app window ready: $Url"
+                return $true
+            }
+            # 参数可能被策略/驱动吞掉：降级为普通新窗口，再验证一次
+            Write-Log "chrome app window not detected in 8s; retry with --new-window"
+            Start-Process -FilePath $chrome -ArgumentList @('--new-window', $Url) | Out-Null
+            if (Wait-AppWindow -Seconds 8) {
+                Write-Log "chrome normal window ready (fallback): $Url"
+                return $true
+            }
+            Write-Log "chrome window still not detected; falling back to Edge/default browser"
         } catch {
             Write-Log "chrome app mode failed: $($_.Exception.Message)"
         }

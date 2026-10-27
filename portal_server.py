@@ -26,6 +26,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -41,6 +42,17 @@ PORTAL_HTML = ROOT / "电工猴的此思妙想工作台.html"
 ALLOWED_SUFFIX = {".html", ".htm", ".png", ".ico", ".css", ".js", ".svg"}
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DRY_RUN = False
+PORTAL_VERSION = 2
+PORT_RANGE = range(8770, 8791)
+
+
+def portal_running(port: int) -> bool:
+    """判断该端口上是否已有本门户实例（必须校验身份，不能只看端口通不通）。"""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=0.5) as resp:
+            return json.loads(resp.read().decode("utf-8")).get("portal") == "workbench"
+    except Exception:
+        return False
 
 
 def find_pythonw() -> str:
@@ -138,7 +150,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/health":
             # portal 字段用于让启动器识别"这是我们自己的服务"，
             # 避免把别的程序（例如 8787 上的 New API）误当成本地门户复用。
-            return self._json({"ok": True, "portal": "workbench", "version": 1, "root": str(ROOT)})
+            return self._json({"ok": True, "portal": "workbench", "version": PORTAL_VERSION,
+                               "pid": os.getpid(), "root": str(ROOT)})
 
         if path == "/api/launch":
             app = (qs.get("app") or [""])[0]
@@ -177,7 +190,27 @@ def main() -> None:
     args = ap.parse_args()
     DRY_RUN = bool(args.dry_run)
 
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    # 已有实例在服务就直接退出：避免反复双击在多个端口上堆出多个服务进程。
+    # 仅在使用默认端口区间时启用；测试/自检传入其他端口时不干扰在跑的实例。
+    if args.port in PORT_RANGE:
+        for p in PORT_RANGE:
+            if p != args.port and portal_running(p):
+                print(f"portal already running at {p}; exit")
+                return
+
+    # 端口可能被别的程序占用（例如 8787 上的 New API）：自动换下一个
+    srv = None
+    candidates = [args.port] + [p for p in PORT_RANGE if p != args.port]
+    for p in candidates:
+        try:
+            srv = ThreadingHTTPServer(("127.0.0.1", p), Handler)
+            args.port = p
+            break
+        except OSError:
+            continue
+    if srv is None:
+        raise SystemExit("no free port in range")
+
     print(f"portal server: http://127.0.0.1:{args.port}/")
     try:
         srv.serve_forever()

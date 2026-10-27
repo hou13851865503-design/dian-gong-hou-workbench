@@ -57,3 +57,37 @@ git clone https://github.com/hou13851865503-design/qq-email-homework-assistant.g
 ## 说明
 
 本仓库只含工作台本体（门户页 + 启动器 + 图标）；两个应用是独立仓库，见 `apps/` 约定。
+
+## 工程质量：硬规则与自检
+
+这些规则对应曾经真实发生过的故障，**改动相关文件前请先跑自检**：
+
+```bash
+python tools/lint_portal.py     # 静态守卫：CSS/服务标识/启动器流程/编码
+python tools/verify_portal.py   # 真实渲染自检：起服务 + 真 Chrome + CDP 截图与 DOM 断言
+```
+
+### 三条硬规则
+
+1. **页面禁用**：全屏 `filter: blur()`、`backdrop-filter`、`background-attachment: fixed`。
+   这类合成层在部分 GPU 上会整屏渲染成黑色——而无头浏览器截图完全正常，极易误判。
+2. **服务必须可识别**：`/api/health` 返回 `{"portal": "workbench", ...}`。
+   启动器只能复用通过身份校验的端口，否则会把窗口开到别人（例如 8787 上的 New API）的页面上。
+3. **启动器必须验证结果**：打开窗口后检查进程 + 主窗口句柄，失败要降级重试，不能"启动完就当成功"。
+
+### 已知坑（都已在代码里规避）
+
+| 坑 | 现象 | 规避 |
+|---|---|---|
+| Chrome `--disable-gpu` | 启动后立即退出 | 不使用该参数 |
+| Edge 单实例 | `--app` 被转发，退化成普通窗口 | 用 Chrome `--app` + 独立 profile |
+| 新建 Chrome profile | 弹首次运行欢迎页盖住应用窗口 | 预置 `First Run` 标记 |
+| PowerShell 管道 `\| Remove-Item -Force` | 无匹配项时报 missing path operand 并中断 | 改用 `ForEach-Object` |
+| `.ps1` 无 BOM | PowerShell 5.1 中文乱码 | 保存为 UTF-8 BOM + CRLF |
+
+### 排障顺序
+
+1. 看 `portal_launcher.log` 最后几行（记录了端口、就绪、窗口验证结果）；
+2. `curl --noproxy '*' http://127.0.0.1:8770/api/health` 确认服务身份；
+3. 跑 `python tools/verify_portal.py`，它会明确告诉你页面是否真的渲染出来了。
+
