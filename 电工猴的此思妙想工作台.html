@@ -269,6 +269,28 @@
     @media (max-width: 560px) {
       .dash-grid { grid-template-columns: 1fr; }
     }
+
+    /* ===== 更新进展 ===== */
+    .updates { margin-top: 20px; }
+    .updates-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
+    .updates-head h2 { margin: 0; font-size: 14px; font-weight: 800; color: var(--ink); }
+    .updates-head .hint { font-size: 11px; color: var(--muted); }
+    .update-list { display: flex; flex-direction: column; gap: 8px; }
+    .update { display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); box-shadow: var(--shadow-sm); }
+    .update-when { flex: 0 0 68px; font-size: 11px; font-weight: 700; color: var(--muted); padding-top: 3px; white-space: nowrap; }
+    .update-main { min-width: 0; }
+    .update-main h4 { margin: 0 0 4px; font-size: 13px; font-weight: 800; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .update-main p { margin: 0; font-size: 11px; color: var(--muted); line-height: 1.65; }
+    .update-main p + p { margin-top: 4px; }
+    .update-main code { background: rgba(15,90,77,.10); padding: 1px 5px; border-radius: 5px; font-size: 10px; }
+    .tag { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+    .tag.fix { color: #b3261e; background: rgba(213,109,89,.16); }
+    .tag.new { color: #0f5a4d; background: rgba(31,160,138,.16); }
+
+    @media (max-width: 560px) {
+      .update { flex-direction: column; gap: 5px; }
+      .update-when { flex: none; padding-top: 0; }
+    }
   </style>
 </head>
 <body>
@@ -376,11 +398,48 @@
           </div>
         </section>
 
+        <section class="updates">
+          <div class="updates-head">
+            <h2>更新进展</h2>
+            <span class="hint">QQ 邮箱作业班长助手 · 2026-11-01</span>
+          </div>
+          <div class="update-list">
+            <div class="update">
+              <div class="update-when">11-01</div>
+              <div class="update-main">
+                <h4>授权码记住此设备，重启自动重连<span class="tag new">新增</span></h4>
+                <p>账号与授权码用 Windows DPAPI 加密存入 <code>data/session.bin</code>，只有当前 Windows 账户能解开；启动时先同步解密一次（只解密不联网），页面打开即显示「已记住 xxx」，随后后台登录，约 0.5 秒自动变「已连接」。</p>
+              </div>
+            </div>
+            <div class="update">
+              <div class="update-when">11-01</div>
+              <div class="update-main">
+                <h4>修复「明明保存了，界面却显示未连接」<span class="tag fix">修复</span></h4>
+                <p>首屏在自动登录完成前就渲染，且前端只请求一次状态、不轮询。现在「连接中…」期间每 700ms 复查一次，状态落定后整页刷新，不会再出现"看着没连上，其实已经连上"。</p>
+              </div>
+            </div>
+            <div class="update">
+              <div class="update-when">11-01</div>
+              <div class="update-main">
+                <h4>区分「授权码失效」与「网络不通」<span class="tag fix">修复</span></h4>
+                <p>此前网络故障也提示"请重新生成授权码"，等于诱导你作废一个本来有效的码。现在按错误类型分别提示，且自动连接失败时保留本机凭据。</p>
+              </div>
+            </div>
+            <div class="update">
+              <div class="update-when">11-01</div>
+              <div class="update-main">
+                <h4>重启后不再跑旧版本<span class="tag fix">修复</span></h4>
+                <p>健康检查加上版本标识：同版本才复用已有窗口，版本不同则让旧进程退出并接管端口；探测同时绕开系统代理，避免每次启动新开一个端口堆进程。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="features">
           <h2 class="features-title">功能亮点</h2>
           <div class="feature-grid">
             <div class="feature"><span class="feature-ico">📊</span><div><h4>提交可视化</h4><p>环形完成度 + 班级分布，谁没交一眼看清。</p></div></div>
-            <div class="feature"><span class="feature-ico">🔒</span><div><h4>本地隐私优先</h4><p>授权码只留内存，扫描结果与 PDF 都在本机。</p></div></div>
+            <div class="feature"><span class="feature-ico">🔒</span><div><h4>本地隐私优先</h4><p>授权码用系统级加密留在本机，扫描结果与 PDF 都不出电脑。</p></div></div>
             <div class="feature"><span class="feature-ico">🤖</span><div><h4>多 Agent 流水线</h4><p>评估 → 优化 → 执行 → 验收，失败自动打回。</p></div></div>
             <div class="feature"><span class="feature-ico">💬</span><div><h4>实时控制台</h4><p>与 Codex 直接对话，工具调用全程可追。</p></div></div>
           </div>
