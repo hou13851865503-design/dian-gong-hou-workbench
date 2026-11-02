@@ -52,9 +52,13 @@
 
     .win {
       width: min(100%, 1000px);
-      height: min(86vh, 720px);
+      height: min(88vh, 780px);
       display: grid;
       grid-template-columns: 84px minmax(0, 1fr);
+      /* 行高必须显式收紧：否则唯一那行会被内容撑高，.stage-body 的
+         overflow:auto 无从生效（clientHeight == scrollHeight），
+         超出的部分被 .win 的 overflow:hidden 直接裁掉且无法滚动。 */
+      grid-template-rows: minmax(0, 1fr);
       background: var(--paper);
       border-radius: 18px;
       overflow: hidden;
