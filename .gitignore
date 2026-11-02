@@ -6,3 +6,7 @@ Thumbs.db
 __pycache__/
 *.pyc
 portal_launcher.log
+
+# 启动失败时自动生成的诊断包（截图、进程号、环境变量快照），
+# 属于运行期产物，每排一次障就多一个时间戳目录，不入库。
+docs/diag/

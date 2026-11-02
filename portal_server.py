@@ -13,6 +13,7 @@
 
 接口：
     GET /                 门户页
+    GET /resume           简历工坊（转发桌面的单文件工具）
     GET /api/health       健康检查
     GET /api/launch?app=homework|ai   启动对应应用（等待端口就绪后返回 url）
     GET /<静态文件>        仅放行 html/png/ico/css/js/svg，且禁止访问 apps/ 与 .git
@@ -39,10 +40,16 @@ AI_PY = AI_DIR / "platform.py"
 HW_PY = HW_DIR / "app.pyw"
 PORTAL_HTML = ROOT / "电工猴的此思妙想工作台.html"
 
+# 简历工具是独立维护的单文件应用，放在桌面。
+# 这里只做只读转发，不复制一份到 ROOT 下 —— 复制早晚会两边不一致。
+RESUME_HTML = Path(r"D:\Desktop\简历\index.html")
+
 ALLOWED_SUFFIX = {".html", ".htm", ".png", ".ico", ".css", ".js", ".svg"}
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DRY_RUN = False
-PORTAL_VERSION = 2
+# 2 -> 3：新增 /resume 路由。启动器目前只校验 portal 标识、不比较版本，
+# 所以这个数字现在只用于人工排查"跑的是哪一版"，但留着比不留好。
+PORTAL_VERSION = 3
 PORT_RANGE = range(8770, 8791)
 
 
@@ -156,6 +163,14 @@ class Handler(BaseHTTPRequestHandler):
             # 避免把别的程序（例如 8787 上的 New API）误当成本地门户复用。
             return self._json({"ok": True, "portal": "workbench", "version": PORTAL_VERSION,
                                "pid": os.getpid(), "root": str(ROOT)})
+
+        if path in ("/resume", "/resume/", "/resume/index.html"):
+            # 简历工具挂在门户的域名下，这样浏览器里的 http 页面才能打开它
+            # （网页不允许直接跳 file://，所以不能靠链接到本地文件）。
+            if not RESUME_HTML.is_file():
+                return self._send(500, "简历工具缺失（D:\\Desktop\\简历\\index.html）".encode("utf-8"),
+                                  "text/plain; charset=utf-8")
+            return self._send(200, RESUME_HTML.read_bytes(), "text/html; charset=utf-8")
 
         if path == "/api/launch":
             app = (qs.get("app") or [""])[0]

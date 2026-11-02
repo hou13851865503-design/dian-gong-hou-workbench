@@ -192,6 +192,7 @@
     }
     .app-ava.assignment { background: linear-gradient(135deg, var(--teal), var(--teal-2)); }
     .app-ava.agents { background: linear-gradient(135deg, var(--coral), #e89b86); }
+    .app-ava.resume { background: linear-gradient(135deg, #2f6f9e, #4b93c4); }
     .app-ava svg { width: 24px; height: 24px; }
 
     .app-main { min-width: 0; flex: 1; }
@@ -332,6 +333,7 @@
         <div class="stage-actions">
           <a class="lbtn primary" href="#" onclick="return launchApp('homework',8765)">启动作业助手</a>
           <a class="lbtn ghost" href="#" onclick="return launchApp('ai',8767)">启动 AI 工作台</a>
+          <a class="lbtn ghost" href="/resume" target="_blank" rel="noopener" onclick="return openResume(event)">打开简历工坊</a>
         </div>
       </header>
 
@@ -371,6 +373,25 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
             </span>
           </a>
+
+          <a class="app-row" href="/resume" target="_blank" rel="noopener" onclick="return openResume(event)">
+            <span class="app-ava resume" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 3.75h8l4 4v12.5H6a2 2 0 0 1-2-2V5.75a2 2 0 0 1 2-2Z"/>
+                <path d="M14 3.75v4h4"/>
+                <circle cx="10" cy="11.5" r="1.6"/>
+                <path d="M7.2 17c.5-1.5 1.5-2.3 2.8-2.3s2.3.8 2.8 2.3"/>
+                <path d="M15.5 11.5h2.5M15.5 14.5h2.5"/>
+              </svg>
+            </span>
+            <span class="app-main">
+              <h3>简历工坊</h3>
+              <p>三套版式 × 三档密度，导入别人的简历自动识别并重排，打印直接出 A4 PDF。</p>
+            </span>
+            <span class="app-meta"><span class="badge local">本地</span>打开
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+            </span>
+          </a>
         </div>
 
         <section class="dash">
@@ -401,9 +422,23 @@
         <section class="updates">
           <div class="updates-head">
             <h2>更新进展</h2>
-            <span class="hint">QQ 邮箱作业班长助手 · 2026-11-01</span>
+            <span class="hint">简历工坊 · QQ 邮箱作业助手 · 2026-11-02</span>
           </div>
           <div class="update-list">
+            <div class="update">
+              <div class="update-when">11-02</div>
+              <div class="update-main">
+                <h4>导入别人的简历，自动识别并重排<span class="tag new">新增</span></h4>
+                <p>支持可选中文字的 PDF、Word 文档和图片：先取文字，按段落标题与日期切出教育、经历、项目、技能，再判断原简历是单栏还是双栏，套用最接近的版式。没配大模型时走本机规则、不联网；接上本机 8787 中转后识别质量更高，失败会自动回退，不会卡住。</p>
+              </div>
+            </div>
+            <div class="update">
+              <div class="update-when">11-02</div>
+              <div class="update-main">
+                <h4>简历工坊上线：三套版式 + 三档密度<span class="tag new">新增</span></h4>
+                <p>单文件零依赖，双击即用。左边填内容，右边实时预览 A4；打印直接出 PDF，分页处不会把一条要点切成两半。数据存在本机浏览器里，简历内容不上传。</p>
+              </div>
+            </div>
             <div class="update">
               <div class="update-when">11-01</div>
               <div class="update-main">
@@ -449,7 +484,7 @@
   </div>
 
   <div class="footer">
-    <span class="local-indicator"><span class="local-dot" aria-hidden="true"></span>本地工作台 · 2 个本机应用 · 经桌面快捷方式启动</span>
+    <span class="local-indicator"><span class="local-dot" aria-hidden="true"></span>本地工作台 · 3 个本机应用 · 经桌面快捷方式启动</span>
   </div>
 
   <script>
@@ -544,6 +579,17 @@
           alert('启动失败：' + e.message + '\n\n请用桌面快捷方式打开本页（需要本地门户服务）。');
         });
       return false;
+    };
+    // 简历工坊是门户自带的页面，不需要拉起进程。
+    // 但用 file:// 直接打开本页时 /resume 会解析成 file:///resume 而失效，
+    // 这里统一改指向门户地址。
+    window.openResume = function (ev) {
+      if (location.protocol === 'file:') {
+        if (ev) { ev.preventDefault(); }
+        window.open('http://127.0.0.1:8770/resume', '_blank', 'noopener');
+        return false;
+      }
+      return true;
     };
   </script>
 </body>
